@@ -1,0 +1,1 @@
+Can you help me design an evolutionary algorithm to tackle the traveling salesman problem. I need a good initialization heuristic which takes into account infinite cost between some cities (no connection considered infinite wait) What are my options?
