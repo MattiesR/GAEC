@@ -60,7 +60,7 @@
 
 %opening
 \title{\vspace{-2cm}Evolutionary Algorithms: Group report}
-\author{\ReplaceMe{Group Member 1}, \ReplaceMe{Group Member 2}, and Matties Roofthooft}
+\author{Kaixi Yao, Sarthak Janjuha, Julius Jacobitz and Matties Roofthooft}
 
 \begin{document}
 \fontfamily{ppl}
@@ -78,22 +78,10 @@ A candidate solution is represented using a permutation of all cities except for
 We initialize the population by generating a set of completely random permutations. Each individual in the starting population is a random, unique ordering of all the cities (nodes 1 to $N-1$). We first create a list containing all the cities that need to be visited, which is $[1, 2, 3, ..., N-1]$. We then use NumPy's \texttt{rng.permutation()} function to randomly shuffle this list. The result is a random, feasible tour where each city appears exactly once. 
 
 \subsection{Selection operators}
-We considered two selection operators: 
-\begin{itemize}
-    \item Fitness-Proportionate Selection (Roulette Wheel): where individuals are selected with a probability proportional to their fitness. 
-    \item  Tournament Selection: where a small group of individuals is randomly selected, and the best one from that group is selected. 
-\end{itemize}
-We choose k-tournament selection because $k$ directly controls the selection pressure and it works well even when fitness values have a large range (like our tour lengths), as it only compares relative fitness within the tournament group. Small $k$ (e.g., 2-3) means a more diverse selection, weaker individuals have a better chance. Large k (e.g., 5-10) means a more aggressive selection, strongly favoring the best individuals. We use $k = 5$ since it creates sufficient selection pressure to quickly exploit good solutions while still maintaining enough diversity to avoid premature convergence. 
+We considered two selection operators: fitness-proportionate selection (roulette wheel) and tournament selection. We choose $k$-tournament selection because k directly controls the selection pressure and it works well even when fitness values have a large range (like our tour lengths), as it only compares relative fitness within the tournament group. Small $k$ (e.g., 2-3) means a more diverse selection, weaker individuals have a better chance. Large $k$ (e.g., 5-10) means a more aggressive selection, strongly favoring the best individuals. We use $k = 5$ since it creates sufficient selection pressure to quickly exploit good solutions while still maintaining enough diversity to avoid premature convergence. 
 
 \subsection{Mutation operator}
-We considered the following mutation operators: 
-
-\begin{itemize}
-    \item     Swap Mutation: randomly selects two positions in the tour and swaps the cities at those positions. 
-    \item     Inversion Mutation: randomly selects a contiguous subtour and reverses the order of the cities within it. 
-    \item     Scramble Mutation: randomly selects a contiguous subtour and completely shuffles the order of the cities within that segment. 
-\end{itemize}
-Based on the prompts, the inversion mutation is set as the default scheme. It effectively acts as a “macro-mutation” that can create a significant change in the tour structure while still preserving many adjacent city pairs (or “edges”). It also introduces a powerful form of randomness. We use a dynamic mutation rate that starts at a base level (e.g., 0.3) and increases when the algorithm stagnates encouraging more exploration. Besides, the potential size of the change is inherently controlled by the segment size, allowing for both small tweaks and large-scale rearrangements. 
+We considered the following mutation operators: swap mutation, inversion mutation, scramble mutation. Based on the prompts, the inversion mutation is set as the default scheme. It effectively acts as a “macro-mutation” that can create a significant change in the tour structure while still preserving many adjacent city pairs (or “edges”). It also introduces a powerful form of randomness. We use a dynamic mutation rate that starts at a base level (e.g., 0.3) and increases when the algorithm stagnates encouraging more exploration. Besides, the potential size of the change is inherently controlled by the segment size, allowing for both small tweaks and large-scale rearrangements. 
 
 \subsection{Recombination operator}
 We considered the following crossover operations: 
@@ -219,9 +207,7 @@ The mean value for the whole population being way higher then the best member co
 \section*{Appendix}
 \addcontentsline{toc}{section}{Appendix}
 
-\subsection*{A. Example code snippet}
-Below is an example of a core function used in our evolutionary algorithm implementation.
-
+\subsection*{A. Prompts}
 \begin{promptbox}
 We are solving the travleing salesman problem on a graph with an genetic algorithm. We are looking for the shortest path between nodes.
 Your data in the given csv is a graph representation by a  nxn  matrix with distances between the nodes in each cell.  If 2 cells are not directly connected, they have a distance of infinite. Its a directed graph.
@@ -278,16 +264,5 @@ as optional mutation schemes
 add dynamic mutation rate to this evolutionary algorithm
 \end{promptbox}
 
-
-
-\subsection*{B. Additional results}
-Figure~\ref{fig:extra-results} shows an additional run of the evolutionary algorithm on a different benchmark instance.
-
-\begin{figure}[h!]
-    \centering
-    \includegraphics[width=0.8\linewidth]{../convergence_graph.png}
-    \caption{Convergence of mean and best fitness values over generations for an additional test case.}
-    \label{fig:extra-results}
-\end{figure}
 
 \end{document}
