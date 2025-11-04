@@ -246,7 +246,6 @@ trash/
 *.nlo
 *.nls
 *.out
-*.pdf
 *.pyg
 *.run.xml
 *.snm
@@ -263,7 +262,6 @@ trash/
 .mtc
 *.fdb_latexmk
 *.xml
-*.pdf
 *.fls
 *.bcf
 *.pyg
