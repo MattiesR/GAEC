@@ -92,30 +92,87 @@ This report should be uploaded to Toledo by \deadlineGroup. It must be in the \t
 
 \subsection{Chosen parameter values}
 
-\ReplaceMe{What parameters are there to choose in your basic evolutionary algorithm? How did you approach parameter selection for now? Did you experiment a bit with different values? What was the influence of this choice? Which are the parameters that you will use for the experiments below?}
+\subsubsection{Parameters}
+\textbf{Population size}, \textbf{Number of generations}, \textbf{Selection method} (tournament selection with tournament size $k$), \textbf{Crossover rate}, \textbf{Adaptive mutation rate} (base value, maximum value, and increase factor), and \textbf{Elitism} (number of elite individuals to keep).
 
+\subsubsection{Parameter Selection Flow}
+In general, the parameter selection flow was an iterative approach changing parameters based on previous knowledge from the lectures and educated guesses. Letting the algorithm run with a given set of parameters, evaluating the results and optimizing parameters in a specific way to change the behavior of our algorithm to provide better results. For example, decrease selection pressure to converge slower. 
+
+We started with educated guesses on initial parameters, comparing the results against the given baseline. We immediately increased “Max. Generations" No improvement generations to let our algorithm explore longer.  
+
+We experimented a lot with different values and value combinations to fine-tune the behavior of our algorithm: 
+\begin{itemize}
+    \item Decreasing population size helped us to speed up the process and pave the way for local optimization techniques (which scale linearly with population size)
+    \item Because we had the feeling that our algorithm didn’t do enough exploration, we changed mutation rates, k-tournament selection rounds and elite counts. 
+\end{itemize}
+
+In the end Table \ref{chosen_params} lists the parameters that seemed to return the best results, surpassing the baseline.
+
+
+\begin{table}
+\centering    
+\begin{tabular}{l|l}
+\textbf{Parameter}               & \textbf{Value} \\ \hline
+Population size                  & 200              \\
+Max generations                  & 5000           \\
+No improvement generations      & 300             \\
+Selection method (tournament k)  & 5               \\
+Adaptive mutation rate (base)    & 0.3            \\
+Adaptive mutation rate (max)     & 0.9             \\
+Adaptive mutation rate (factor)  & 1.05            \\
+Elitism (number of elite indiv.) & 2             
+\end{tabular}
+\caption{Chosen parameter values for the evolutionary algorithm}    
+\label{chosen_params}
+\end{table}
+
+
+%%%%%%
 \subsection{Preliminary results}
 
-\ReplaceMe{Run your algorithm on the smallest benchmark problem. Include a convergence graph, by plotting the mean and best objective values in function of the time. How long did your program run until convergence? How do you rate the performance of your algorithm (time, memory, speed of convergence, diversity of population, etc)? What was the best fitness value you found? Do you think this is the global optimum? 
+In total we executed the algorithm with the chosen parameters from Table \ref{chosen_params} on 100 different random seeds. Figure \ref{best_run_convergence} shows a convergence graph of the best run.
+The \textbf{best value} we achieved was \textbf{13844.3383}.
+We do not think this is the global optimum, as there is no proof of optimality and there is always a slight chance that a better solution exists.
 
-When you solve this problem several times, how much variation do you observe in the best solution? Include an informative plot of this.}
+When solving this problem on 100 different random seeds, we observed some variation in the best solution.
+Figure \ref{histogram_best_values} shows a histogram of the best values found over the 100 runs. It shows a mean of 14110.64 with a standard deviation of 179.17. This is definitely a significant variation, indicating that the algorithm's performance is still sensitive to the initial random seed. (But at least its a little scewed towards lower values).
+Figure \ref{all_runs_best_value} shows the convergence of all 100 runs.
 
-\begin{itemize}
-    \item Run your algorithm on the smallest benchmark problem. Include a convergence graph, by plotting the mean and
-best objective values in function of the time. (DONE)
-    \item How long did your program run until convergence? (17-20 sec)
-    \item What was the best fitness value you found? (13844.3383)
-    \item Do you think this is the global optimum? (No (get idea why))
-    \item When you solve this problem several times, how much variation do you observe in the best solution? Include an
-    informative plot of this (DONE see notebook vis all)
-\end{itemize}
 
-\subsubsection{How do you rate the performance of your algorithm (time, memory, speed of convergence, diversity of population, etc)?}
-\begin{itemize}
-    \item time: 17-20 sec is a fast runtime. It also converges relatively quickly (within 300-400 generations). After some time adaptive mutation rate kicks in and forces exploration.
-    \item memory: (TODO)
-    \item speed of convergence: as said above convergence speed is high (looking at a limit of 5minutes). 
-    \item diversity of population: (TODO) (plot)
-\end{itemize}
+The program ran for for apprximately 17-20 seconds until convergence and stops after 300 generations of no improvement.
+This is not the fastest runtime but we wanted to use the given time of 5 min to find a very good solution.
+It converges relatively quickly (within 300-400 generations). Figure \ref{best_run_convergence_zoom} shows nicely how the adaptive mutation rate forces exploration after some time of stagnation.
+Memory usage is not optimized but should be fine for all problem sizes as population management and individual representation are done efficiently.
+The mean value for the whole population being way higher then the best member could indicate a high population diversity (Figure \ref{best_run_convergence}). 
+
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/mean_best_value_over_time.png} 
+    \caption{Best run convergence graph over time.}
+    \label{best_run_convergence}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/mean_best_value_over_time_zoomed.png} 
+    \caption{Zoomed in version of Figure \ref{best_run_convergence}.}
+    \label{best_run_convergence_zoom}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/histogram_best_values.png} 
+    \caption{Histogram of best values for 100 different random seeds.}
+    \label{histogram_best_values}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\textwidth]{images/best_value_over_iterations.png} 
+    \caption{Best value for 100 different random seeds.}
+    \label{all_runs_best_value}
+\end{figure}
+
 
 \end{document}

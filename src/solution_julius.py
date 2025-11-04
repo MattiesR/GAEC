@@ -13,6 +13,15 @@ class r0123456:
 
     # Ordered crossover (OX)
     def ordered_crossover(self, parent_a, parent_b, rng):
+        """
+        Performs ordered crossover (OX) between two parent permutations.
+        Args:
+            parent_a (np.ndarray): First parent permutation.
+            parent_b (np.ndarray): Second parent permutation.
+            rng (np.random.Generator): Random number generator.
+        Returns:
+            np.ndarray: Child permutation resulting from crossover.
+        """
         n = parent_a.size
         child = -np.ones(n, dtype=int)
         i, j = sorted(rng.choice(n, size=2, replace=False))
