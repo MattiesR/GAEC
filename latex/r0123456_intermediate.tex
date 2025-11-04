@@ -123,16 +123,14 @@ The use of AI tends to be more efficient than writing code from scratch provided
 \textbf{Population size}, \textbf{Number of generations}, \textbf{Selection method} (tournament selection with tournament size $k$), \textbf{Crossover rate}, \textbf{Adaptive mutation rate} (base value, maximum value, and increase factor), and \textbf{Elitism} (number of elite individuals to keep).
 
 \subsubsection{Parameter Selection Flow}
-In general, the parameter selection flow was an iterative approach changing parameters based on previous knowledge from the lectures and educated guesses. Letting the algorithm run with a given set of parameters, evaluating the results and optimizing parameters in a specific way to change the behavior of our algorithm to provide better results. For example, decrease selection pressure to converge slower. 
-
-We started with educated guesses on initial parameters, comparing the results against the given baseline. We immediately increased “Max. Generations" No improvement generations to let our algorithm explore longer.  
-
+In general, the parameter selection flow was an iterative approach changing parameters based on previous knowledge from the lectures and educated guesses. Letting the algorithm run with a given set of parameters, evaluating the results and optimizing parameters in a specific way to change the behavior of our algorithm to provide better results. For example, decrease selection pressure to converge slower. \\
+We started with educated guesses on initial parameters, comparing the results against the given baseline. We immediately increased “Max. Generations" No improvement generations to let our algorithm explore longer.  \\
 We experimented a lot with different values and value combinations to fine-tune the behavior of our algorithm: 
 \begin{itemize}
     \item Decreasing population size helped us to speed up the process and pave the way for local optimization techniques (which scale linearly with population size)
     \item Because we had the feeling that our algorithm didn’t do enough exploration, we changed mutation rates, k-tournament selection rounds and elite counts. 
 \end{itemize}
-
+\noindent
 In the end Table \ref{chosen_params} lists the parameters that seemed to return the best results, surpassing the baseline.
 
 
@@ -159,13 +157,10 @@ Elitism (number of elite indiv.) & 2
 
 In total we executed the algorithm with the chosen parameters from Table \ref{chosen_params} on 100 different random seeds. Figure \ref{best_run_convergence} shows a convergence graph of the best run.
 The \textbf{best value} we achieved was \textbf{13844.3383}.
-We do not think this is the global optimum, as there is no proof of optimality and there is always a slight chance that a better solution exists.
-
+We do not think this is the global optimum, as there is no proof of optimality and there is always a slight chance that a better solution exists. \\
 When solving this problem on 100 different random seeds, we observed some variation in the best solution.
 Figure \ref{histogram_best_values} shows a histogram of the best values found over the 100 runs. It shows a mean of 14110.64 with a standard deviation of 179.17. This is definitely a significant variation, indicating that the algorithm's performance is still sensitive to the initial random seed. (But at least its a little scewed towards lower values).
-Figure \ref{all_runs_best_value} shows the convergence of all 100 runs.
-
-
+Figure \ref{all_runs_best_value} shows the convergence of all 100 runs.\\
 The program ran for for apprximately 17-20 seconds until convergence and stops after 300 generations of no improvement.
 This is not the fastest runtime but we wanted to use the given time of 5 min to find a very good solution.
 It converges relatively quickly (within 300-400 generations). Figure \ref{best_run_convergence_zoom} shows nicely how the adaptive mutation rate forces exploration after some time of stagnation.
