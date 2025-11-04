@@ -107,7 +107,7 @@ We combined two stopping criteria for the algorithm. The primary criterion is a 
 
 
 \subsection{Prompts to generate code}
-We wrote a single prompt consisting of the context information and a description of each component of the genetic algorithm. The result was already pretty good, with a little tweaking the method performed already pretty well. We inserted another prompt asking for a set of new mutations which copilot did implement correctly. 
+We wrote a single prompt consisting of the context information and a description of each component of the genetic algorithm. The result was already pretty good, with a little tweaking the method performed already pretty well. We inserted another prompt asking for a set of new mutations which copilot did implement correctly. Our prompts can be found in appendix B.
 
 \subsection{Prompts to fix errors}
 The code was free of coding errors, but the parameter selection was off. The code was manually adjusted to fix input/output related tasks. 
@@ -217,7 +217,6 @@ The mean value for the whole population being way higher then the best member co
 
 \subsection*{B. Prompts}
 \begin{promptbox}
-
 We are solving the travleing salesman problem on a graph with an genetic algorithm. We are looking for the shortest path between nodes.
 Your data in the given csv is a graph representation by a  nxn  matrix with distances between the nodes in each cell.  If 2 cells are not directly connected, they have a distance of infinite. Its a directed graph.
 
