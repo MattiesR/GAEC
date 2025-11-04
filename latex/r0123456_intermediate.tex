@@ -16,6 +16,7 @@
 \usepackage{cleveref}
 \usepackage{graphicx}
 \usepackage{float}
+\usepackage{subcaption}
 
 \usepackage{tcolorbox}
 \tcbuselibrary{listingsutf8,breakable,skins}
@@ -165,21 +166,25 @@ The program ran for for apprximately 17-20 seconds until convergence and stops a
 This is not the fastest runtime but we wanted to use the given time of 5 min to find a very good solution.
 It converges relatively quickly (within 300-400 generations). Figure \ref{best_run_convergence_zoom} shows nicely how the adaptive mutation rate forces exploration after some time of stagnation.
 Memory usage is not optimized but should be fine for all problem sizes as population management and individual representation are done efficiently.
-The mean value for the whole population being way higher then the best member could indicate a high population diversity (Figure \ref{best_run_convergence}). 
-
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{images/mean_best_value_over_time.png} 
-    \caption{Best run convergence graph over time.}
-    \label{best_run_convergence}
-\end{figure}
+The mean value for the whole population being way higher then the best member could indicate a high population diversity (Figure \ref{best_run_convergence}).
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{images/histogram_best_values.png} 
-    \caption{Histogram of best values for 100 different random seeds.}
-    \label{histogram_best_values}
+    \begin{subfigure}[b]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/mean_best_value_over_time.png}
+        \caption{Best run convergence graph over time.}
+        \label{best_run_convergence}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/histogram_best_values.png}
+        \caption{Histogram of best values for 100 different random seeds.}
+        \label{histogram_best_values}
+    \end{subfigure}
+    \caption{Comparison of convergence over time and distribution of final best values.}
+    \label{fig:convergence_and_histogram}
 \end{figure}
 
 
@@ -189,23 +194,28 @@ The mean value for the whole population being way higher then the best member co
 \section*{Appendix}
 
 \addcontentsline{toc}{section}{Appendix}
-\subsection*{A. Figure: \ref{best_run_convergence} Zoomed}
+\subsection*{A. Additional Figures}
+
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{images/mean_best_value_over_time_zoomed.png} 
-    \caption{Zoomed in version of Figure \ref{best_run_convergence}.}
-    \label{best_run_convergence_zoom}
+    \begin{subfigure}[b]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/mean_best_value_over_time_zoomed.png}
+        \caption{Zoomed in version of Figure~\ref{best_run_convergence}.}
+        \label{best_run_convergence_zoom}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{images/best_value_over_iterations.png}
+        \caption{Best value for 100 different random seeds.}
+        \label{all_runs_best_value}
+    \end{subfigure}
+    \caption{Detailed visualization of convergence behavior across runs.}
+    \label{fig:appendix_convergence}
 \end{figure}
 
-\subsection*{B. Figure: Best value over all 100 random seeds}
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.8\textwidth]{images/best_value_over_iterations.png} 
-    \caption{Best value for 100 different random seeds.}
-    \label{all_runs_best_value}
-\end{figure}
-
-\subsection*{C. Prompts}
+\subsection*{B. Prompts}
 \begin{promptbox}
 
 We are solving the travleing salesman problem on a graph with an genetic algorithm. We are looking for the shortest path between nodes.
