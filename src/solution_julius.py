@@ -5,7 +5,9 @@ import time
 
 # Modify the class name to match your student number.
 class r0123456:
-    def __init__(self, ouptut_file, mutation_scheme='inversion', base_mutation_rate=0.3):
+    def __init__(
+        self, ouptut_file, mutation_scheme="inversion", base_mutation_rate=0.3
+    ):
         self.reporter = Reporter.Reporter(filename=ouptut_file)
         # mutation_scheme: 'swap', 'inversion', 'scramble', or 'random' (choose per application)
         self.mutation_scheme = mutation_scheme
@@ -16,7 +18,7 @@ class r0123456:
         n = parent_a.size
         child = -np.ones(n, dtype=int)
         i, j = sorted(rng.choice(n, size=2, replace=False))
-        child[i:(j + 1)] = parent_a[i:(j + 1)]
+        child[i : (j + 1)] = parent_a[i : (j + 1)]
         ptr = 0
         for val in parent_b:
             if val in child:
@@ -39,7 +41,7 @@ class r0123456:
         n = individual.size
         i, j = sorted(rng.choice(n, size=2, replace=False))
         mutated = individual.copy()
-        mutated[i:(j + 1)] = mutated[i:(j + 1)][::-1]
+        mutated[i : (j + 1)] = mutated[i : (j + 1)][::-1]
         return mutated
 
     # Scramble mutation (shuffle elements within a subsequence)
@@ -47,24 +49,26 @@ class r0123456:
         n = individual.size
         i, j = sorted(rng.choice(n, size=2, replace=False))
         mutated = individual.copy()
-        subseq = mutated[i:(j + 1)].copy()
+        subseq = mutated[i : (j + 1)].copy()
         rng.shuffle(subseq)
-        mutated[i:(j + 1)] = subseq
+        mutated[i : (j + 1)] = subseq
         return mutated
 
     # Apply the selected mutation scheme (or choose randomly if 'random')
     def apply_mutation(self, individual, rng):
         scheme = self.mutation_scheme
-        if scheme == 'random':
-            scheme = rng.choice(['swap', 'inversion', 'scramble'])
-        if scheme == 'swap':
+        if scheme == "random":
+            scheme = rng.choice(["swap", "inversion", "scramble"])
+        if scheme == "swap":
             return self.swap_mutation(individual, rng)
-        if scheme == 'inversion':
+        if scheme == "inversion":
             return self.inversion_mutation(individual, rng)
-        if scheme == 'scramble':
+        if scheme == "scramble":
             return self.scramble_mutation(individual, rng)
         # fallback to swap
-        print("Warning: unknown mutation scheme '{}', defaulting to swap".format(scheme))
+        print(
+            "Warning: unknown mutation scheme '{}', defaulting to swap".format(scheme)
+        )
         return self.swap_mutation(individual, rng)
 
     # Compute tour length for permutation (permutation is nodes 1..N-1)
@@ -147,7 +151,11 @@ class r0123456:
 
         bestObjective = np.min(objectives)
         bestSolutionPerm = population[np.argmin(objectives)].copy()
-        meanObjective = np.mean(objectives[np.isfinite(objectives)]) if np.any(np.isfinite(objectives)) else np.inf
+        meanObjective = (
+            np.mean(objectives[np.isfinite(objectives)])
+            if np.any(np.isfinite(objectives))
+            else np.inf
+        )
 
         gen = 0
         no_improve = 0
@@ -187,7 +195,9 @@ class r0123456:
                 if rng.random() < MUTATION_RATE:
                     child = self.apply_mutation(child, rng)
 
-                    if np.array_equal(child, parent_a) or np.array_equal(child, parent_b):
+                    if np.array_equal(child, parent_a) or np.array_equal(
+                        child, parent_b
+                    ):
                         child = self.apply_mutation(child, rng)
 
                 # evaluate child
@@ -215,7 +225,9 @@ class r0123456:
             else:
                 no_improve += 1
                 # Increase mutation rate when no improvement
-                MUTATION_RATE = min(MUTATION_RATE + MUTATION_INCREASE, MAX_MUTATION_RATE)
+                MUTATION_RATE = min(
+                    MUTATION_RATE + MUTATION_INCREASE, MAX_MUTATION_RATE
+                )
 
             mean_vals = objectives[np.isfinite(objectives)]
             meanObjective = np.mean(mean_vals) if mean_vals.size > 0 else np.inf
@@ -232,5 +244,7 @@ tour_number = "50"
 filename = f"src/data/output_julius/tour_{tour_number}.csv"
 folder = f"src/data/"
 
-solver = r0123456(ouptut_file=folder+f"tour_{tour_number}_"+str(int(time.time())).split(".")[0])
-solver.optimize(folder+f"tour{tour_number}.csv")
+solver = r0123456(
+    ouptut_file=folder + f"tour_{tour_number}_" + str(int(time.time())).split(".")[0]
+)
+solver.optimize(folder + f"tour{tour_number}.csv")
