@@ -1,8 +1,0 @@
-All best numbers from static solver (not GA)
-
-50:
-* 13847
-
-250: 
-* 86789
-* 

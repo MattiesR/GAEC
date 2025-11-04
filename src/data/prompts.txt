@@ -38,4 +38,7 @@ Inversion Mutation
  Scramble mutation 
 as optional mutation schemes
 
-—
+—----
+add dynamic mutation rate to this evolutionary algorithm
+
+

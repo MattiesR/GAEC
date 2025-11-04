@@ -16,6 +16,39 @@
 \usepackage{cleveref}
 \usepackage{graphicx}
 
+\usepackage{tcolorbox}
+\tcbuselibrary{listingsutf8,breakable,skins}
+
+\newtcolorbox{promptbox}{
+    enhanced,
+    breakable,
+    colback=gray!3,
+    colframe=black!50,
+    fontupper=\ttfamily\small,
+    boxrule=0.6pt,
+    arc=2mm,
+    left=5pt,
+    right=5pt,
+    title=prompts,
+    top=5pt,
+    bottom=5pt,
+    coltitle=white,
+    fonttitle=\bfseries,
+    attach boxed title to top left={yshift=-2mm, xshift=3mm},
+    boxed title style={
+        colback=black!60,
+        colframe=black!60,
+        boxrule=0pt,
+        arc=1mm,
+        left=2pt,
+        right=2pt,
+        top=1pt,
+        bottom=1pt
+    }
+}
+
+
+
 \newcommand{\nextyear}{\advance\year by 1 \the\year\advance\year by -1}
 \newcommand{\thisyear}{\the\year}
 \newcommand{\deadlineGroup}{November 7, \thisyear{} at 9:00 CET}
@@ -27,7 +60,7 @@
 
 %opening
 \title{\vspace{-2cm}Evolutionary Algorithms: Group report}
-\author{\ReplaceMe{Group Member 1}, \ReplaceMe{Group Member 2}, and \ReplaceMe{Group Member 3}}
+\author{\ReplaceMe{Group Member 1}, \ReplaceMe{Group Member 2}, and Matties Roofthooft}
 
 \begin{document}
 \fontfamily{ppl}
@@ -36,59 +69,64 @@
 \maketitle
 
 %%% You can remove the Formal requirements section
-\RemoveMe{
-\section*{Formal requirements}
-
-Please respect the structure of this template. You can remove the instructions in this section from your report. The blue text should be replaced with your discussion. Your report can be \textbf{at most $4$ pages} long. 
-
-It is recommended that you use this \LaTeX{} template, but you are allowed to reproduce it with the same structure in a WYSIWYG-editor. You should replace the blue text with your discussion. The questions we ask in blue are there to help you decide which topics to discuss, rather than an exact list of questions that must be answered.
-
-This report should be uploaded to Toledo by \deadlineGroup. It must be in the \textbf{Portable Document Format} (pdf) and must be named \texttt{r0123456\_intermediate.pdf}, where r0123456 should be replaced with your student number. \textbf{Each group member should hand it in individually on Toledo.}
-}
-
-\section{A basic evolutionary algorithm \hfill(target: $1$ page)} 
+\section{A basic evolutionary algorithm } 
 
 \subsection{Representation}
-
-\ReplaceMe{How do you represent the candidate solutions? What is your main motivation to choose this one? What other options did you consider? How did you implement this specifically in Python (e.g., a list, set, numpy array, etc)?}
+A candidate solution is represented using a permutation of all cities except for the fixed starting and ending city. Therefore, a candidate solution is represented as a permutation of the $N-1$ cities from 1 to $N-1$. By using a permutation, we ensure that every solution our algorithm creates is a valid tour. We simplify the problem since it only has to optimize the 49 “in-between” cities. We considered the classic binary representation but quickly dismissed it. Encoding a city sequence into a string of bits would be highly complex. Each candidate solution is stored as a 1D NumPy array of integers. The population is a 2D NumPy array with dimensions $(\texttt{POPULATION}\_\texttt{SIZE, N-1})$. For example, \texttt{population[i]} gives the i-th individual in the population, which is a 1D array representing its tour. 
 
 \subsection{Initialization}
-
-\ReplaceMe{How do you initialize the population? How do you generate random cycles?}
+We initialize the population by generating a set of completely random permutations. Each individual in the starting population is a random, unique ordering of all the cities (nodes 1 to $N-1$). We first create a list containing all the cities that need to be visited, which is $[1, 2, 3, ..., N-1]$. We then use NumPy's \texttt{rng.permutation()} function to randomly shuffle this list. The result is a random, feasible tour where each city appears exactly once. 
 
 \subsection{Selection operators}
-
-\ReplaceMe{Which selection operators did you consider? If they are not from the slides, describe them. Which one did you implement? Can you motivate why you chose this one? Are there parameters that need to be chosen? What do you think are reasonable parameter values?}
+We considered two selection operators: 
+\begin{itemize}
+    \item Fitness-Proportionate Selection (Roulette Wheel): where individuals are selected with a probability proportional to their fitness. 
+    \item  Tournament Selection: where a small group of individuals is randomly selected, and the best one from that group is selected. 
+\end{itemize}
+We choose k-tournament selection because $k$ directly controls the selection pressure and it works well even when fitness values have a large range (like our tour lengths), as it only compares relative fitness within the tournament group. Small $k$ (e.g., 2-3) means a more diverse selection, weaker individuals have a better chance. Large k (e.g., 5-10) means a more aggressive selection, strongly favoring the best individuals. We use $k = 5$ since it creates sufficient selection pressure to quickly exploit good solutions while still maintaining enough diversity to avoid premature convergence. 
 
 \subsection{Mutation operator}
+We considered the following mutation operators: 
 
-\ReplaceMe{Which mutation operator(s) did you consider and implement? If they are not from the slides, describe them. Which one did you implement? Why did you choose that one specifically? Do you believe it will introduce sufficient randomness? Can that be controlled with parameters?}
+\begin{itemize}
+    \item     Swap Mutation: randomly selects two positions in the tour and swaps the cities at those positions. 
+    \item     Inversion Mutation: randomly selects a contiguous subtour and reverses the order of the cities within it. 
+    \item     Scramble Mutation: randomly selects a contiguous subtour and completely shuffles the order of the cities within that segment. 
+\end{itemize}
+Based on the prompts, the inversion mutation is set as the default scheme. It effectively acts as a “macro-mutation” that can create a significant change in the tour structure while still preserving many adjacent city pairs (or “edges”). It also introduces a powerful form of randomness. We use a dynamic mutation rate that starts at a base level (e.g., 0.3) and increases when the algorithm stagnates encouraging more exploration. Besides, the potential size of the change is inherently controlled by the segment size, allowing for both small tweaks and large-scale rearrangements. 
 
 \subsection{Recombination operator}
+We considered the following crossover operations: 
+\begin{itemize}
+    \item  Cycle Crossover (CX): Identifies position cycles between parents and swaps them alternately, ensuring each gene inherits its position from one parent while maintaining valid permutations. 
+    \item Order Crossover (OX): Copies a subsequence between two cut points from one parent and fills remaining positions with genes from the other parent , preserving relative order. 
+    \item Position-Based Crossover: Randomly selects positions from one parent to copy into the offspring; remaining spots are filled with genes from the other parent in order, avoiding duplicates. 
+\end{itemize}
+We are using Ordered Crossover (OX) as it is easy to implement for our use case and provides us with good results. It preserves the relative order of cities between parents, and we want to promote a healthy order between generations.  \\
+Using Ordered Crossover, we can preserve partial sequences or subtours, which can represent locally optimal routes. If the two parents have little overlap, the fixed segment taken from Parent A still transfers one good partial structure. The remaining sequences filled from Parent B will likely produce high diversity offspring, potentially exploring new parts of the solution space. \\
+We can control the OX behavior via the choice of cut points (two random indices). By adjusting how these cut points are chosen, we can control how much genetic material is inherited from each parent. Shorter segments lead to less parental inheritance, and more exploration and longer segments lead to more exploitation. Currently in our algorithm, we are using a random length substring. The OX crossover is static in our implementation. 
 
-\ReplaceMe{Which recombination operator(s) did you consider? If they are not from the slides, describe them. Which one did you implement? Why did you choose that one specifically? Explain how you believe that this operator can produce offspring that combine the best features from their parents. How does your operator behave if there is little overlap between the parents? Can your recombination be controlled with parameters; what behavior do they change? Do you use self-adaptivity?}
 
 \subsection{Elimination operators}
-
-\ReplaceMe{Which elimination operators did you consider? If they are not from the slides, describe them. Which one did you implement? Can you motivate why you chose this one? Are there parameters that need to be chosen? What do you think are reasonable parameter values?} 
+We considered $(\lambda + \mu)$ and $(\lambda, \mu)$ elimination operators, and chose $(\lambda, \mu)$-elimination with some Elitism, so the best members are directly copied to the next generation. It guarantees that the best solutions are never lost. We have kept the elitism rate as 5\%. 
 
 \subsection{Stopping criterion}
+We combined two stopping criteria for the algorithm. The primary criterion is a \textbf{maximum generation limit}, which serves as a tunable hyperparameter control when the algorithm terminates. Additionally, we implemented a \textbf{soft adaptive mechanism} through a self-adaptive mutation rate that increases when no improvement is observed over several generations, helping the algorithm escape stagnation and maintain search diversity. 
 
-\ReplaceMe{When do you think the evolutionary algorithm should stop? Which stopping criterion did you implement? Did you combine several criteria?}
+\section{Implementation generation }
 
-\section{Implementation generation \hfill(target: $1$ page)}
 
 \subsection{Prompts to generate code}
-\ReplaceMe{How did you approach the code generation: multiple short prompts to generate individual functions, or did you ask for the whole implementation at once? Which was more efficient? Did you seed Copilot with information before asking it to generate code? What information did you give it? Record the prompts that you used to generate the code. Did you apply some postprocessing to the generated code? What did you do?}
+We wrote a single prompt consisting of the context information and a description of each component of the genetic algorithm. The result was already pretty good, with a little tweaking the method performed already pretty well. We inserted another prompt asking for a set of new mutations which copilot did implement correctly. 
 
 \subsection{Prompts to fix errors}
-\ReplaceMe{Was the generated code free of errors? If not, what was wrong? What type of errors were they: misinterpretation, logical, or programming errors? How did you instruct Copilot to fix these errors? Record the prompts. Did you apply some postprocessing? What did you do?}
+The code was free of coding errors, but the parameter selection was off. The code was manually adjusted to fix input/output related tasks. 
 
 \subsection{Critical reflection}
-\ReplaceMe{Provide your critical reflection on the process of using Copilot to generate a basic evolutionary algorithm implementation. What were the positive and negative points? Was it more or less efficient than writing code from scratch? Was the debugging more or less efficient using Copilot? Do you think the descriptions you provided in section 1 could be used as effective prompts? Why? Would you recommend the use of Copilot for exercise session 2? Any other critical thoughts?}
+Providing the AI with contextual information significantly improves the generation of the code. For a basic evolutionary algorithm, the results are astounding. Copilot produced readable and error-free code which makes it easy to manually tweak if necessary. A risk to bear in mind is that using AI as the baseline of your program could restrict the extendability of the code.  
+The use of AI tends to be more efficient than writing code from scratch provided that you carefully design a prompt and read the generated code to ensure errors are avoided are corrected. 
 
-
-\section{Numerical experiments \hfill(target: $1$ page)}
+\section{Numerical experiments }
 
 \subsection{Chosen parameter values}
 
@@ -174,5 +212,82 @@ The mean value for the whole population being way higher then the best member co
     \label{all_runs_best_value}
 \end{figure}
 
+
+
+\newpage
+\appendix
+\section*{Appendix}
+\addcontentsline{toc}{section}{Appendix}
+
+\subsection*{A. Example code snippet}
+Below is an example of a core function used in our evolutionary algorithm implementation.
+
+\begin{promptbox}
+We are solving the travleing salesman problem on a graph with an genetic algorithm. We are looking for the shortest path between nodes.
+Your data in the given csv is a graph representation by a  nxn  matrix with distances between the nodes in each cell.  If 2 cells are not directly connected, they have a distance of infinite. Its a directed graph.
+
+You have the given code template.
+
+please generate each step of the following exercise:
+
+Generate a representation, the objective function „length", a simple population initialization, a selection mechanism, one mutation operator, one recombination operator, an elimination mechanism, and a stopping criterion that corresponds to the design that you developed in the first exercise session
+
+representation:
+\begin{itemize}
+    \item a possilbe path representation would be a list with all nodes visited in the circle. As the starting (and endpoint) are always fixed, we can just ignore vertex 1
+\end{itemize}
+
+Initialization: 
+\begin{itemize}
+    \item start with random population of possible paths (easy).
+    \item it could be worth it to test for feasability (length != inf.) at initialization
+\end{itemize}
+
+Selection: 
+\begin{itemize}
+    \item decide on a basic way to do this - we thought about k tournament selection 
+\end{itemize}
+
+Variation:
+\begin{itemize}
+    \item Mutation: All basics for permuations
+    \item Combination: order crossover 
+\end{itemize}
+
+elimination:
+\begin{itemize}
+    \item some form of elitism (always keep top 5 percent)
+    \item besides that decide on a strategy
+\end{itemize}
+
+\bigskip
+\hrule
+\bigskip
+
+
+add Insert mutation
+ Swap mutation 
+Inversion Mutation
+ Scramble mutation 
+as optional mutation schemes
+
+\bigskip
+\hrule
+\bigskip
+
+add dynamic mutation rate to this evolutionary algorithm
+\end{promptbox}
+
+
+
+\subsection*{B. Additional results}
+Figure~\ref{fig:extra-results} shows an additional run of the evolutionary algorithm on a different benchmark instance.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.8\linewidth]{../convergence_graph.png}
+    \caption{Convergence of mean and best fitness values over generations for an additional test case.}
+    \label{fig:extra-results}
+\end{figure}
 
 \end{document}
