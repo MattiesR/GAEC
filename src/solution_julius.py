@@ -1,6 +1,7 @@
 import Reporter
 import numpy as np
 import time
+import multiprocessing as mp
 
 
 # Modify the class name to match your student number.
@@ -15,6 +16,15 @@ class r0123456:
 
     # Ordered crossover (OX)
     def ordered_crossover(self, parent_a, parent_b, rng):
+        """
+        Performs ordered crossover (OX) between two parent permutations.
+        Args:
+            parent_a (np.ndarray): First parent permutation.
+            parent_b (np.ndarray): Second parent permutation.
+            rng (np.random.Generator): Random number generator.
+        Returns:
+            np.ndarray: Child permutation resulting from crossover.
+        """
         n = parent_a.size
         child = -np.ones(n, dtype=int)
         i, j = sorted(rng.choice(n, size=2, replace=False))
@@ -110,12 +120,12 @@ class r0123456:
         return best_idx
 
     # The evolutionary algorithm's main loop
-    def optimize(self, filename):
+    def optimize(self, filename, seed=42):
         file = open(filename)
         distanceMatrix = np.loadtxt(file, delimiter=",")
         file.close()
 
-        rng = np.random.default_rng(seed=42)
+        rng = np.random.default_rng(seed=seed)
 
         N = distanceMatrix.shape[0]
         rep_size = N - 1
@@ -134,6 +144,7 @@ class r0123456:
         objectives = np.empty(POP_SIZE, dtype=float)
         nodes = np.arange(1, N, dtype=int)
 
+        # Initial population
         for i in range(POP_SIZE):
             attempts = 0
             obj = np.inf
@@ -244,7 +255,13 @@ tour_number = "50"
 filename = f"src/data/output_julius/tour_{tour_number}.csv"
 folder = f"src/data/"
 
-solver = r0123456(
-    ouptut_file=folder + f"tour_{tour_number}_" + str(int(time.time())).split(".")[0]
-)
-solver.optimize(folder + f"tour{tour_number}.csv")
+def run_optimization(args):
+    seed, tour_number, filename, folder = args
+    solver = r0123456(ouptut_file=folder+f"tour_{tour_number}_seed{seed}_"+str(int(time.time())).split(".")[0])
+    solver.optimize(filename, seed=seed)
+
+if __name__ == '__main__':
+    args_list = [(seed, tour_number, filename, folder) for seed in range(1, 101)]
+    
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        pool.map(run_optimization, args_list)
