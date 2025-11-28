@@ -1,0 +1,12 @@
+name: gaec
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - numba
+  - matplotlib
+  - pip
+  - pip:
+      - optuna        # Optional for hyperparameter tuning
