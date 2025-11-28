@@ -3,14 +3,19 @@ import optuna
 
 
 def objective(trial):
-    solver = r0877229.r0877229()
-    solver.population_size = trial.suggest_int("pop_size", 100, 200)
-    solver.mutation_rate = trial.suggest_float("mut_rate", 0.01, 0.5)
-    solver.crossover_rate = trial.suggest_float("cross_rate", 0.5, 1.0)
-    solver.optimize("./src/data/tour50.csv")
-    
-    # After optimization, return the best objective (lower is better)
-    return solver.best_objective  # or whatever your reporter tracks
+	solver = r0877229.r0877229()
+	solver.population_size = trial.suggest_int("pop_size", 100, 200)
+	solver.mutation_rate = trial.suggest_float("mut_rate", 0.01, 0.5)
+	solver.crossover_rate = trial.suggest_float("cross_rate", 0.5, 1.0)
+
+	solver.patience = 1000
+	solver.init_greedy_ratio = 0.0
+	solver.init_bfs_ratio =0.0
+	solver.init_dfs_ratio = 0.0
+	solver.optimize("./src/data/tour250.csv")
+
+	# After optimization, return the best objective (lower is better)
+	return solver.best_objective  # or whatever your reporter tracks
 
 
 

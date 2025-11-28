@@ -7,6 +7,7 @@ dependencies:
   - numpy
   - numba
   - matplotlib
+  - pandas
   - pip
   - pip:
       - optuna        # Optional for hyperparameter tuning

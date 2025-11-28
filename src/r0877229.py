@@ -25,22 +25,37 @@ class r0877229:
 	# Hyperparameters
 	# -------------------
 	""" Population params """
-	population_size = 50
+	population_size = 100
 
 	""" Variation params """
 	crossover_rate = 0.8
-	mutation_rate = 0.2
+	mutation_rate = 0.3
 
 	""" Stopping criterea params"""
 	max_iterations = 1000
-	patience = 50
+	patience = 100
 
 	""" Initialization params """
-	init_random_ratio = 0.5
+	init_random_ratio = 0.7
 	init_greedy_ratio = 0.3
-	init_bfs_ratio = 0.1
-	init_dfs_ratio = 0.1
+	init_bfs_ratio = 0.0
+	init_dfs_ratio = 0.0
 	
+	""" Selection params """
+	k_tournament = 4
+	elitism_ratio = 0.05	# Default as 5%
+	
+	""" Variation params """
+	
+	
+	
+	# Ratios Mutations (weights of mutation schemes)
+	swap_ratio = 0.55
+	inversion_ratio = 0.35	
+	scramble_ratio = 0.10 	# Occasional low probability
+
+
+
 	# -------------------
 	# Objective function
 	# -------------------
@@ -145,7 +160,6 @@ class r0877229:
 			(self.init_graph_bfs, self.init_bfs_ratio),
 			(self.init_graph_dfs, self.init_dfs_ratio),
 		]
-
 		# Compute number of individuals per method
 		counts = [int(pop_size * ratio) for _, ratio in methods]
 
@@ -154,6 +168,15 @@ class r0877229:
 		if remaining != 0:
 			counts[0] += remaining  # Add the difference to the first method (random)
 
+		""" Print statements"""
+		print("------------------------------")
+		print(f"Initialized population of {pop_size} individuals.")
+		method_names = ["Random", "Greedy", "BFS", "DFS"]
+		for method, count in zip(method_names, counts):
+			print(f"{method}: {count}")
+		print("------------------------------")
+		
+		"""	-------------- """
 		# Allocate population array
 		population = np.zeros((pop_size, num_cities), dtype=np.int32)
 
@@ -254,7 +277,6 @@ class r0877229:
 					queue.extend(neighbors)
 
 			population[k] = np.array(path, dtype=np.int32) + 1  # 1-based indexing
-
 		return population
 
 
@@ -264,23 +286,48 @@ class r0877229:
 
 	""" next generation """
 	def next_generation(self, population, fitness):
+		num_individuals = len(population)
 		new_pop = np.zeros_like(population)
-		for i in range(len(population)):
+
+		# 1) Preserve top 'elitism' individuals
+		elitism = int(self.population_size * self.elitism_ratio)
+		if elitism > 0:
+			elite_idx = np.argsort(fitness)[:elitism]  # best fitness first
+			new_pop[:elitism] = population[elite_idx]
+
+		# 2) Fill rest of population
+		for i in range(elitism, num_individuals):
 			parent1, parent2 = self.select_parents(population, fitness)
 			child = self.crossover(parent1, parent2)
 			child = self.mutate(child)
 			new_pop[i] = child
+
 		return new_pop
 
 	""" Selection process """
+	""" k-tournament selection (vectorized, faster for large populations) """
+
 	def select_parents(self, population, fitness):
-		idx1, idx2 = np.random.choice(len(population), 2, replace=False)
-		parent1 = population[idx1] if fitness[idx1] < fitness[idx2] else population[idx2]
+		"""
+		Select two parents using k-tournament selection (vectorized with NumPy).
+		Returns copies of parents.
+		"""
 
-		idx3, idx4 = np.random.choice(len(population), 2, replace=False)
-		parent2 = population[idx3] if fitness[idx3] < fitness[idx4] else population[idx4]
+		""" 
+			Mixed strategy requires sample with probability from a method 
+			Or by integrating directly in next_generation	
+		"""
+		def tournament():
+			# Choose k random individuals
+			idx = np.random.choice(len(population), self.k_tournament, replace=False)
+			# Pick the one with lowest fitness (TSP: lower cost is better)
+			best_idx = idx[np.argmin(fitness[idx])]
+			return population[best_idx]
 
-		return parent1, parent2
+		parent1 = tournament()
+		parent2 = tournament()
+		return parent1.copy(), parent2.copy()
+
 
 
 	""" Variation steps """
@@ -289,10 +336,36 @@ class r0877229:
 			return ordered_crossover(parent1, parent2)
 		return parent1.copy()
 
+
 	def mutate(self, individual):
 		if np.random.rand() < self.mutation_rate:
-			return swap_mutation(individual)
+			U = np.random.rand()
+			if U < self.swap_ratio:
+				return swap_mutation(individual)
+			elif U < self.swap_ratio + self.inversion_ratio:
+				return inversion_mutation(individual)
+			else:
+				return scramble_mutation(individual)
 		return individual
+	
+
+	""" Default settings for hyperparameters """
+	def set_mutation(self,type):
+		if type == "swap":
+			self.swap_ratio = 1.0
+			self.inversion_ratio = 0.0
+			self.scramble_ratio = 0.0
+		if type == "inversion":
+			self.swap_ratio = 0.0
+			self.inversion_ratio = 1.0
+			self.scramble_ratio = 0.0
+		if type == "scramble":
+			self.swap_ratio = 0.0
+			self.inversion_ratio = 0.0
+			self.scramble_ratio = 1.0
+		assert self.swap_ratio + self.inversion_ratio + self.scramble_ratio == 1.0
+
+
 
 
 # -------------------
@@ -325,9 +398,36 @@ def evaluate_population_numba(population, distance_matrix):
 
 @njit
 def swap_mutation(individual):
-	a, b = np.random.randint(0, len(individual), 2)
-	individual[a], individual[b] = individual[b], individual[a]
-	return individual
+    """Swap two random positions in the individual."""
+    a, b = np.random.randint(0, len(individual), 2)
+    individual[a], individual[b] = individual[b], individual[a]
+    return individual
+
+@njit
+def inversion_mutation(individual):
+    """Invert a random segment of the individual."""
+    size = len(individual)
+    a, b = np.random.randint(0, size, 2)
+    if a > b:
+        a, b = b, a
+    # reverse the segment in place
+    while a < b:
+        individual[a], individual[b] = individual[b], individual[a]
+        a += 1
+        b -= 1
+    return individual
+
+@njit
+def scramble_mutation(individual):
+    """Scramble a random segment of the individual."""
+    size = len(individual)
+    a, b = np.random.randint(0, size, 2)
+    if a > b:
+        a, b = b, a
+    segment = individual[a:b+1].copy()
+    np.random.shuffle(segment)
+    individual[a:b+1] = segment
+    return individual
 
 @njit
 def ordered_crossover(parent1, parent2):
