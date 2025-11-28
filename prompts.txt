@@ -1,1 +1,5 @@
 Can you help me design an evolutionary algorithm to tackle the traveling salesman problem. I need a good initialization heuristic which takes into account infinite cost between some cities (no connection considered infinite wait) What are my options?
+
+
+
+This is the template code i have received and which should be respected. I need to implement genetic algorithm. I will have a lot of hyperparameters to tune and i would like to have a library from pip doing this for me to generate reports etc. Also i want to use numba to speed up my calculations Can you give me an idea of how to structure this code? Where i can put my functions of the algorithm where i should have my hyperparameters And how to use numba for it efficiently?
