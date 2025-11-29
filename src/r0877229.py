@@ -28,8 +28,12 @@ class r0877229:
 	population_size = 100
 
 	""" Variation params """
-	crossover_rate = 0.8
+	crossover_rate = 0.95
 	mutation_rate = 0.3
+	mutation_patience = 50
+	mutation_increase = 0.05	
+	mut_high = 0.7
+	mut_low = 0.3
 
 	""" Stopping criterea params"""
 	max_iterations = 1000
@@ -42,19 +46,20 @@ class r0877229:
 	init_dfs_ratio = 0.0
 	
 	""" Selection params """
-	k_tournament = 4
-	elitism_ratio = 0.05	# Default as 5%
+	k_tournament = 2
+	elitism_ratio = 0.001	# Default as 5%
 	
 	""" Variation params """
-	
-	
 	
 	# Ratios Mutations (weights of mutation schemes)
 	swap_ratio = 0.55
 	inversion_ratio = 0.35	
 	scramble_ratio = 0.10 	# Occasional low probability
 
-
+	""" Local search params """
+	local_search_probability = 0.3
+	K_lso = 40				# Number of neirest_neighbours
+	max_improvement_lso = 20
 
 	# -------------------
 	# Objective function
@@ -94,20 +99,31 @@ class r0877229:
 		iteration = 0
 		no_improvement = 0
 		
+		# Evaluate initial population fitness
+		fitness = self.evaluate_population(population, distance_matrix)
+
+		mutation_rate_original = self.mutation_rate
 		while iteration < self.max_iterations:
-			# Evaluate population
-			fitness = self.evaluate_population(population, distance_matrix)
 
 			# Reporting
 			mean_objective = np.mean(fitness)
 			best_idx = np.argmin(fitness)
 			best_objective = fitness[best_idx]
-			best_solution = population[best_idx] - 1  # Convert to 0-based for reporter
-
+			best_solution = population[best_idx]
 			time_left = self.reporter.report(mean_objective, best_objective, best_solution)
 
+
+
+			# Adaptive mutation
+			if no_improvement % self.mutation_patience == 0:
+				# self.mutation_rate += self.mutation_increase*mutation_rate_original
+				self.mutation_rate = self.mut_high
+				print(f"Mutation rate increased to: {self.mutation_rate}")
+
+
+
 			# Genetic operations
-			population = self.next_generation(population, fitness)
+			population, fitness = self.next_generation(population, fitness, distance_matrix)
 
 			# Stopping criteria
 			if time_left < 0:
@@ -116,6 +132,10 @@ class r0877229:
 				break
 			if best_objective < self.best_objective:
 				no_improvement = 0
+				# self.mutation_rate = mutation_rate_original
+				self.mutation_rate = self.mut_low
+				print(f"Best objective= {best_objective:.1f}, mean= {mean_objective:.1f}, diversity= {compute_diversity(population)}")
+				
 
 			iteration += 1
 			no_improvement += 1
@@ -198,7 +218,7 @@ class r0877229:
 	def init_random(self, num_cities, pop_size):
 		pop = np.zeros((pop_size, num_cities), dtype=np.int32)
 		for i in range(pop_size):
-			pop[i] = np.random.permutation(num_cities) + 1
+			pop[i] = np.random.permutation(num_cities)
 		return pop
 
 	# Greedy 
@@ -218,7 +238,7 @@ class r0877229:
 				unvisited.remove(next_city)
 				current = next_city
 
-			population[k] = np.array(visited, dtype=np.int32) + 1
+			population[k] = np.array(visited, dtype=np.int32)
 
 		return population
 
@@ -247,7 +267,7 @@ class r0877229:
 					np.random.shuffle(neighbors)  # Randomize DFS traversal
 					stack.extend(neighbors)
 
-			population[k] = np.array(path, dtype=np.int32) + 1  # 1-based indexing
+			population[k] = np.array(path, dtype=np.int32)
 
 		return population
 
@@ -276,7 +296,7 @@ class r0877229:
 					np.random.shuffle(neighbors)  # Randomize BFS traversal
 					queue.extend(neighbors)
 
-			population[k] = np.array(path, dtype=np.int32) + 1  # 1-based indexing
+			population[k] = np.array(path, dtype=np.int32)
 		return population
 
 
@@ -285,7 +305,7 @@ class r0877229:
 		return evaluate_population_numba(population, distance_matrix)
 
 	""" next generation """
-	def next_generation(self, population, fitness):
+	def next_generation(self, population, fitness, distance_matrix):
 		num_individuals = len(population)
 		new_pop = np.zeros_like(population)
 
@@ -300,9 +320,27 @@ class r0877229:
 			parent1, parent2 = self.select_parents(population, fitness)
 			child = self.crossover(parent1, parent2)
 			child = self.mutate(child)
+
+			if np.random.rand() < self.local_search_probability:	# Apply LSO to children 
+				N = distance_matrix.shape[0]
+				candidate_list = np.zeros((N, self.K_lso), dtype=np.int32)
+				for j in range(N):
+					candidate_list[j] = np.argsort(distance_matrix[j])[:self.K_lso]
+				child = two_opt_fast(child, distance_matrix, self.max_improvement_lso)
 			new_pop[i] = child
 
-		return new_pop
+		# 3) Elimination step
+		combined_pop = np.vstack([population, new_pop])
+
+		# Compute fitness for offspring (parent fitness known)
+		offspring_fitness = self.evaluate_population(new_pop, distance_matrix)
+		combined_fitness = np.concatenate((fitness, offspring_fitness))
+
+		best_indices = np.argsort(combined_fitness)[:num_individuals]
+		# Eliminate the lambda worst => keep lambda best
+		new_pop = combined_pop[best_indices]
+		new_fitness = combined_fitness[best_indices]
+		return new_pop, new_fitness
 
 	""" Selection process """
 	""" k-tournament selection (vectorized, faster for large populations) """
@@ -372,6 +410,7 @@ class r0877229:
 # Diagnostic functions
 # -------------------
 def compute_diversity(population):
+	# Hamming distance != edge
 	return np.mean([
 		np.sum(population[i] != population[j])
 		for i in range(len(population))
@@ -390,8 +429,8 @@ def evaluate_population_numba(population, distance_matrix):
 		tour = population[i]
 		total = 0.0
 		for j in range(len(tour)):
-			from_city = tour[j] - 1
-			to_city = tour[(j + 1) % len(tour)] - 1
+			from_city = tour[j]
+			to_city = tour[(j + 1) % len(tour)]
 			total += distance_matrix[from_city, to_city]
 		fitness[i] = total
 	return fitness
@@ -442,3 +481,49 @@ def ordered_crossover(parent1, parent2):
 				pointer += 1
 			child[pointer] = gene
 	return child
+
+@njit
+def two_opt_fast(route, distance_matrix, 
+                 max_improve=10,        # max number of improving swaps
+                 candidate_list=None):  # optional list of nearest neighbors
+	"""
+	Implements the 2-opt heuristic using the best-improvement strategy.
+	Assumes route is a 0-based numpy array of city indices.
+	dist is a 2D numpy array (distance matrix).
+	"""
+	N = len(route)
+	improved = True
+	improve_count = 0
+
+	while improved and improve_count < max_improve:
+		improved = False
+		
+		for i in range(N - 1):
+			# Determine candidate js
+			if candidate_list is None:
+				js = range(i + 2, N)  # standard full loop
+			else:
+				js = candidate_list[route[i]]  # only nearest neighbors
+			
+			for j in js:
+				if j <= i + 1 or j >= N:  # skip invalid indices
+					continue
+				
+				# wrap-around edges
+				a = route[i - 1] if i > 0 else route[N - 1]
+				b = route[i]
+				c = route[j]
+				d = route[(j + 1) % N]
+				
+				# compute delta
+				delta = distance_matrix[a, c] + distance_matrix[b, d] - distance_matrix[a, b] - distance_matrix[c, d]
+				
+				if delta < 0:
+					# perform 2-opt swap
+					route[i:j+1] = route[i:j+1][::-1]
+					improved = True
+					improve_count += 1
+					break  # first improvement strategy
+			if improved:
+				break  # restart outer loop after first improvement
+	return route

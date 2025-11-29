@@ -5,14 +5,16 @@ import optuna
 def objective(trial):
 	solver = r0877229.r0877229()
 	solver.population_size = trial.suggest_int("pop_size", 100, 200)
-	solver.mutation_rate = trial.suggest_float("mut_rate", 0.01, 0.5)
-	solver.crossover_rate = trial.suggest_float("cross_rate", 0.5, 1.0)
+	solver.mutation_rate = trial.suggest_float("mut_rate", 0.01, 0.4)
+	solver.crossover_rate = trial.suggest_float("cross_rate", 0.7, 1.0)
+	solver.init_greedy_ratio = trial.suggest_float("init_greedy_ratio", 0.0, 1.0)
+	solver.init_bfs_ratio = trial.suggest_float("init_bfs_ratio", 0.0, 1.0-solver.init_greedy_ratio)
+	solver.init_dfs_ratio = trial.suggest_float("init_dfs_ratio", 0.0, 1.0-solver.init_greedy_ratio-solver.init_bfs_ratio)
+	solver.init_random_ratio = 1- solver.init_greedy_ratio - solver.init_bfs_ratio - solver.init_dfs_ratio
+	
+	solver.patience = 300
 
-	solver.patience = 1000
-	solver.init_greedy_ratio = 0.0
-	solver.init_bfs_ratio =0.0
-	solver.init_dfs_ratio = 0.0
-	solver.optimize("./src/data/tour250.csv")
+	solver.optimize("./src/data/tour500.csv")
 
 	# After optimization, return the best objective (lower is better)
 	return solver.best_objective  # or whatever your reporter tracks
