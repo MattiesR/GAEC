@@ -5,16 +5,8 @@ import plots
 
 
 if __name__ == "__main__":
-	size = 10
-	filename = f"greedy{size}random"
+	size = 500
+	filename = f"geac_tour_{size}"
 	solver = r0877229.r0877229(filename)
-	solver.init_random_ratio = 0.0
-	solver.init_greedy_ratio = 1.0
-	solver.init_bfs_ratio = 0.0
-	solver.init_dfs_ratio = 0.0
-	# solver.mutation_rate = 0.03
-	solver.population_size = 100
-	solver.max_iterations = 10e3
-	solver.patience = 2e2
 	solver.optimize(f"src/data/tour{size}.csv")
 	plots.plot_convergence(filename)

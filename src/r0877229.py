@@ -20,12 +20,14 @@ class Diagnostics:
 			self.data[k].append(v)
 
 
+
+
 class r0877229:
 	# -------------------
 	# Hyperparameters
 	# -------------------
 	""" Population params """
-	population_size = 100
+	population_size = 200
 
 	""" Variation params """
 	crossover_rate = 0.85
@@ -35,16 +37,13 @@ class r0877229:
 	mut_high = 0.7
 	mut_low = 0.3
 
-	""" Stopping criterea params"""
-	max_iterations = 1000
-	patience = 100
 
 	""" Initialization params """
-	init_random_ratio = 0.7
-	init_greedy_ratio = 0.3
+	init_random_ratio = 0.0
+	init_greedy_ratio = 1.0
 	init_bfs_ratio = 0.0
 	init_dfs_ratio = 0.0
-	
+	init_vectorized_random_ratio = 0.0
 	""" Selection params """
 	k_tournament = 2
 	elitism_ratio = 0.001	# Default as 5%
@@ -61,22 +60,36 @@ class r0877229:
 	K_lso = 12				# Number of neirest_neighbours
 	max_improvement_lso = 20
 
+
 	# -------------------
 	# Objective function
 	# -------------------
 	best_objective = np.inf
 	mean_objective = np.inf
 	
-	#--------------------
-	# Diagnostic flags
-	#--------------------
-	DIAGNOSE = False
-
-
 	def __init__(self, filename=None):
+		# Global-only hyperparameters (instance attributes) 
+		""" Stopping criterea params"""
+		self.max_iterations = 1000
+		self.patience = 100
+		#--------------------
+		# Diagnostic flags
+		#--------------------
+		self.DIAGNOSE = False
+
+
+		""" Diversity promotion """
+		self.islands = 4				 # 8
+		self.migration_interval = 40	 # 100
+
+		""" Diversity per Island """
+		self.island_diversity_init = 0.2  # Diversity in the initialization of islands
+		self.island_diversity_rules = 0.2 # Different rules at different islands
+
 		if filename is None:
 			filename = self.__class__.__name__
 		self.reporter = Reporter.Reporter(filename)
+		
 	
 	def enable_diagnostics(self):
 		self.DIAGNOSE = True
@@ -93,37 +106,50 @@ class r0877229:
 			filling_values=np.inf
 		)
 
-		# Initialize population
-		population = self.initialize_population(len(distance_matrix), self.population_size, distance_matrix)
+		# Initialize islands
+		populations = [self.initialize_population(len(distance_matrix), self.population_size//self.islands, distance_matrix)
+					for _ in range(self.islands)]
+		fitnesses = [self.evaluate_population(pop, distance_matrix) for pop in populations]
 
 		iteration = 0
 		no_improvement = 0
-		
-		# Evaluate initial population fitness
-		fitness = self.evaluate_population(population, distance_matrix)
 
-		mutation_rate_original = self.mutation_rate
 		while iteration < self.max_iterations:
 
-			# Reporting
-			mean_objective = np.mean(fitness)
-			best_idx = np.argmin(fitness)
-			best_objective = fitness[best_idx]
-			best_solution = population[best_idx]
+			# --- Genetic operations per island ---
+			for i in range(self.islands):
+				populations[i], fitnesses[i] = self.next_generation(populations[i], fitnesses[i], distance_matrix)
+
+			# --- Migration ---
+			if iteration % self.migration_interval == 0:
+				self.migrate(populations, fitnesses, distance_matrix)
+
+			# --- Track global best ---
+			all_fitness = [f for fit in fitnesses for f in fit]
+			flat_population = [ind for pop in populations for ind in pop]
+			best_idx = np.argmin(all_fitness)
+			best_solution = flat_population[best_idx]
+			best_objective = all_fitness[best_idx]
+			mean_objective = np.mean(all_fitness)
+
+			# --- Track best per island ---
+			best_per_island = []
+			for i in range(self.islands):
+				best_i_idx = np.argmin(fitnesses[i])
+				best_i_solution = populations[i][best_i_idx]
+				best_i_objective = fitnesses[i][best_i_idx]
+				best_per_island.append((best_i_solution, best_i_objective))
+
+			# --- Reporting ---
 			time_left = self.reporter.report(mean_objective, best_objective, best_solution)
-
-
+			print("Best per island:")
+			for idx, (_, obj) in enumerate(best_per_island):
+				print(f"  Island {idx}: best objective = {obj}")
 
 			# Adaptive mutation
 			if no_improvement % self.mutation_patience == 0:
-				# self.mutation_rate += self.mutation_increase*mutation_rate_original
 				self.mutation_rate = self.mut_high
 				print(f"Mutation rate increased to: {self.mutation_rate}")
-
-
-
-			# Genetic operations
-			population, fitness = self.next_generation(population, fitness, distance_matrix)
 
 			# Stopping criteria
 			if time_left < 0:
@@ -132,10 +158,7 @@ class r0877229:
 				break
 			if best_objective < self.best_objective:
 				no_improvement = 0
-				# self.mutation_rate = mutation_rate_original
 				self.mutation_rate = self.mut_low
-				print(f"Best objective= {best_objective:.1f}, mean= {mean_objective:.1f}, diversity= {compute_diversity(population)}")
-				
 
 			iteration += 1
 			no_improvement += 1
@@ -144,18 +167,28 @@ class r0877229:
 			self.best_objective = best_objective
 			self.mean_objective = mean_objective
 
+			print(f"Iteration: {iteration}, best = {best_objective}, mean= {mean_objective}")
+
+
+			# # Example: compute matrix of inter-island distances
+			# num_islands = len(populations)
+			# dist_matrix = np.zeros((num_islands, num_islands))
+			# for i in range(num_islands):
+			# 	for j in range(i+1, num_islands):
+			# 		d = island_distance(populations[i], populations[j])
+			# 		dist_matrix[i,j] = d
+
+			# print("Inter-island distance matrix:")
+			# print(dist_matrix)
+
 			# Diagnostic calculations
 			if self.DIAGNOSE:
-				diversity = compute_diversity(population)
 				mutation_success = None
 				crossover_success = None
-				self.diag.record(
-					diversity=diversity,
-					mutation_success=mutation_success,
-					crossover_success=crossover_success
-				)
 
 		return 0
+
+
 
 	# -------------------
 	# GA Methods
@@ -179,6 +212,7 @@ class r0877229:
 			(self.init_greedy, self.init_greedy_ratio),
 			(self.init_graph_bfs, self.init_bfs_ratio),
 			(self.init_graph_dfs, self.init_dfs_ratio),
+			(self.init_vectorized_random, self.init_vectorized_random_ratio)
 		]
 		# Compute number of individuals per method
 		counts = [int(pop_size * ratio) for _, ratio in methods]
@@ -191,7 +225,7 @@ class r0877229:
 		""" Print statements"""
 		print("------------------------------")
 		print(f"Initialized population of {pop_size} individuals.")
-		method_names = ["Random", "Greedy", "BFS", "DFS"]
+		method_names = ["Random", "Greedy", "BFS", "DFS", "random_feasible"]
 		for method, count in zip(method_names, counts):
 			print(f"{method}: {count}")
 		print("------------------------------")
@@ -222,9 +256,38 @@ class r0877229:
 		return pop
 
 	# Greedy 
-	def init_greedy(self, distance_matrix, pop_size):
+	# def init_greedy(self, distance_matrix, pop_size):
+	# 	num_cities = distance_matrix.shape[0]
+	# 	population = np.zeros((pop_size, num_cities), dtype=np.int32)
+
+	# 	for k in range(pop_size):
+	# 		current = np.random.randint(0, num_cities)
+	# 		visited = [current]
+	# 		unvisited = set(range(num_cities))
+	# 		unvisited.remove(current)
+
+	# 		while unvisited:
+	# 			next_city = min(unvisited, key=lambda j: distance_matrix[current, j])
+	# 			visited.append(next_city)
+	# 			unvisited.remove(next_city)
+	# 			current = next_city
+
+	# 		population[k] = np.array(visited, dtype=np.int32)
+
+	# 	return population
+	
+	# Greedy with optional noise
+	def init_greedy(self, distance_matrix, pop_size, noise_scale=0.01):
 		num_cities = distance_matrix.shape[0]
 		population = np.zeros((pop_size, num_cities), dtype=np.int32)
+
+		# Precompute noisy distance matrix ONCE per population
+		if noise_scale > 0:
+			# Use median distance for scale robustness
+			base_scale = np.median(distance_matrix[np.isfinite(distance_matrix)])
+			noisy_dist = distance_matrix + noise_scale * base_scale * np.random.randn(*distance_matrix.shape)
+		else:
+			noisy_dist = distance_matrix  # pure greedy
 
 		for k in range(pop_size):
 			current = np.random.randint(0, num_cities)
@@ -233,7 +296,8 @@ class r0877229:
 			unvisited.remove(current)
 
 			while unvisited:
-				next_city = min(unvisited, key=lambda j: distance_matrix[current, j])
+				# Greedy step based on *noisy* distances
+				next_city = min(unvisited, key=lambda j: noisy_dist[current, j])
 				visited.append(next_city)
 				unvisited.remove(next_city)
 				current = next_city
@@ -243,34 +307,53 @@ class r0877229:
 		return population
 
 
+
+	def init_vectorized_random(self, distance_matrix, pop_size):
+		n = distance_matrix.shape[0]
+		pop = np.zeros((pop_size, n), dtype=np.int32)
+
+		# --- 1. Vectorized random permutations ---
+		for k in range(pop_size):
+			pop[k] = np.random.permutation(n)
+
+		# Convert ∞ to a large number for faster vector ops
+		INF = np.inf
+		dm = distance_matrix
+
+		# --- 2. Repair infeasible edges (vectorized per-individual) ---
+		for k in range(pop_size):
+			tour = pop[k]
+
+			for i in range(n - 1):
+				u = tour[i]
+				v = tour[i + 1]
+
+				if dm[u, v] == INF:
+					# find all feasible next nodes
+					remaining = tour[i+1:]
+					feasible_mask = (dm[u, remaining] != INF)
+
+					if not np.any(feasible_mask):
+						# fallback: choose closest feasible city (vectorized)
+						feasible = np.where(dm[u] != INF)[0]
+						v_new = feasible[np.argmin(dm[u, feasible])]
+					else:
+						# pick a random feasible city
+						feasible = remaining[feasible_mask]
+						v_new = np.random.choice(feasible)
+
+					# swap positions so next city is v_new
+					idx = np.where(tour == v_new)[0][0]
+					tour[i+1], tour[idx] = tour[idx], tour[i+1]
+
+			pop[k] = tour
+
+		return pop
 	# --- Graph-aware Randomized DFS ---
 	def init_graph_dfs(self, distance_matrix, pop_size):
 		num_cities = distance_matrix.shape[0]
 		population = np.zeros((pop_size, num_cities), dtype=np.int32)
-
-		for k in range(pop_size):
-			start = np.random.randint(0, num_cities)
-			visited = [False] * num_cities
-			path = []
-
-			stack = [start]
-			while stack:
-				node = stack.pop()
-				if not visited[node]:
-					visited[node] = True
-					path.append(node)
-
-					# Neighbors: nodes with finite distance
-					neighbors = [j for j in range(num_cities)
-								if distance_matrix[node, j] != np.inf and not visited[j]]
-
-					np.random.shuffle(neighbors)  # Randomize DFS traversal
-					stack.extend(neighbors)
-
-			population[k] = np.array(path, dtype=np.int32)
-
-		return population
-
+		raise NotImplemented
 
 	# --- Graph-aware BFS ---
 	def init_graph_bfs(self, distance_matrix, pop_size):
@@ -471,6 +554,31 @@ class r0877229:
 			self.scramble_ratio = 1.0
 		assert self.swap_ratio + self.inversion_ratio + self.scramble_ratio == 1.0
 
+	def migrate(self, populations, fitnesses, distance_matrix, migrants_per_island=1):
+		""" Ring migration: best individual moves to next island. """
+		best_individuals = [pop[np.argmin(fit)] for pop, fit in zip(populations, fitnesses)]
+		for i in range(self.islands):
+			next_island = (i+1) % self.islands
+			for _ in range(migrants_per_island):
+				# replace worst in next island
+				worst_idx = np.argmax(fitnesses[next_island])
+				populations[next_island][worst_idx] = best_individuals[i]
+				# ind_array = np.array([best_individuals[i]], dtype=np.int32)  # shape (1, n_cities)
+				fitnesses[next_island][worst_idx] = self.evaluate_population(populations[next_island], distance_matrix)[0]
+
+
+class Island(r0877229):
+	""" Island class """
+	def __init__(self, island_idx, pop_size=None):
+		super().__init__()
+		self.island_idx = island_idx
+		self.pop_size = pop_size if pop_size is not None else self.population_size // self.islands
+
+		self.population = None
+		self.indiv_rules = None
+		self.fitness = None
+
+
 
 
 
@@ -484,6 +592,24 @@ def compute_diversity(population):
 		for i in range(len(population))
 		for j in range(i+1, len(population))
 	])
+
+def edge_set(tour):
+    n = len(tour)
+    return set(tuple(sorted((tour[i], tour[(i+1)%n]))) for i in range(n))
+
+def island_distance(pop1, pop2):
+    # Average edge-based distance between all pairs (one from each island)
+    n1, n2 = len(pop1), len(pop2)
+    dist_sum = 0
+    for t1 in pop1:
+        edges1 = edge_set(t1)
+        for t2 in pop2:
+            edges2 = edge_set(t2)
+            shared = len(edges1 & edges2)
+            dist_sum += 1 - shared/len(edges1)
+    return dist_sum / (n1 * n2)
+
+
 
 
 # -------------------
