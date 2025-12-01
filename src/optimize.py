@@ -1,38 +1,123 @@
-import r0877229
 import optuna
+import csv
+import r0877229
+import optuna.visualization as viz
 
 
-def objective(trial):
+# ------------------------------
+# CSV WRITER CALLBACK
+# ------------------------------
+class CSVLogger:
+    def __init__(self, filename):
+        self.filename = filename
+        self.initialized = False
+
+    def __call__(self, study, trial):
+        # Create header once
+        if not self.initialized:
+            with open(self.filename, "w", newline="") as f:
+                writer = csv.writer(f)
+                header = ["trial_number", "objective"] + list(trial.params.keys())
+                writer.writerow(header)
+            self.initialized = True
+
+        # Append each trial result
+        with open(self.filename, "a", newline="") as f:
+            writer = csv.writer(f)
+            row = [trial.number, trial.value] + list(trial.params.values())
+            writer.writerow(row)
+
+
+# ------------------------------
+# Objective function
+# ------------------------------
+def objective(trial,size):
+
 	solver = r0877229.r0877229()
-	solver.population_size = trial.suggest_int("pop_size", 100, 200)
-	solver.mutation_rate = trial.suggest_float("mut_rate", 0.01, 0.4)
-	solver.crossover_rate = trial.suggest_float("cross_rate", 0.7, 1.0)
-	solver.init_greedy_ratio = trial.suggest_float("init_greedy_ratio", 0.0, 1.0)
-	solver.init_bfs_ratio = trial.suggest_float("init_bfs_ratio", 0.0, 1.0-solver.init_greedy_ratio)
-	solver.init_dfs_ratio = trial.suggest_float("init_dfs_ratio", 0.0, 1.0-solver.init_greedy_ratio-solver.init_bfs_ratio)
-	solver.init_random_ratio = 1- solver.init_greedy_ratio - solver.init_bfs_ratio - solver.init_dfs_ratio
+
+	# Population params
+	solver.population_size = trial.suggest_int("pop_size", 50, 300)
 	
-	solver.patience = 300
-
-	solver.optimize("./src/data/tour500.csv")
-
-	# After optimization, return the best objective (lower is better)
-	return solver.best_objective  # or whatever your reporter tracks
-
-
-
-if __name__ == "__main__":
-	# Create a study
-	study = optuna.create_study(direction="minimize")  # we want to minimize tour length
-
-	# Run optimization
-	study.optimize(objective, n_trials=50)  # try 50 sets of hyperparameters
-
-	# Print results
-	print("Best trial:")
-	trial = study.best_trial
-	print(f"  Value: {trial.value}")
-	print("  Params: ")
-	for key, value in trial.params.items():
-		print(f"    {key}: {value}")
+	# Variation params
+	solver.crossover_rate = trial.suggest_float("cross_rate", 0.6,1.0)
     
+	solver.mutation_patience = trial.suggest_float("mut_patience", 20,200)
+	solver.mut_high = trial.suggest_float("mut_high", 0.2, 0.8)
+	solver.mut_low = trial.suggest_float("mut_low", 0.0, 0.4)
+      
+
+	# Stopping criteria params
+	solver.max_iterations = 1e5
+	solver.patience = trial.suggest_int("patience", 1e2,3e2)
+      
+	# Init params
+	solver.init_greedy_ratio = trial.suggest_float("init_greedy_ratio", 0.0, 1.0)
+	solver.init_random_ratio = 1 - (solver.init_greedy_ratio)
+
+	# Selection params
+	solver.k_tournament = trial.suggest_int("k_tourn", 1,10)
+	solver.elitism_ratio = trial.suggest_float("elitism", 0.0, 0.10)
+    
+	# Mutation scheme ratios
+	solver.swap_ratio = trial.suggest_float("swap", 0.10,0.60)
+	solver.inversion_ratio = trial.suggest_float("invers", 0.10, 1-solver.swap_ratio-0.05)
+	solver.scramble_ratio = 1 - (solver.swap_ratio - solver.inversion_ratio)
+
+	# Local search params
+	solver.local_search_probability = trial.suggest_float("LSO_prob", 0.0, 0.4)
+	solver.K_lso = trial.suggest_int("K-nearest", 5,50)
+	solver.max_improvement_lso = trial.suggest_int("max_improv", 1,20)
+	# Run your solver
+	solver.optimize(f"./src/data/tour{size}.csv")
+	return solver.best_objective
+
+
+
+# ------------------------------
+# Main
+# ------------------------------
+if __name__ == "__main__":
+
+	study = optuna.create_study(direction="minimize")
+	size = 50
+	print(f"Optimize for tour {size}")
+	csv_logger = CSVLogger(f"optuna_results_{size}.csv")
+	n_trials = 1000
+	objective_fun = lambda trial : objective(trial, size)
+	study.optimize(
+		objective_fun,
+		n_trials=n_trials,            # change to 100000 if you want
+		callbacks=[csv_logger]  # log each trial
+	)
+
+	# Save best trial separately
+	with open(f"optuna_best_trial_{size}.csv", "w", newline="") as f:
+		writer = csv.writer(f)
+		writer.writerow(["parameter", "value"])
+		for k, v in study.best_trial.params.items():
+			writer.writerow([k, v])
+		writer.writerow(["objective", study.best_trial.value])
+
+	print("Finished. Results written to:")
+	print(f" - optuna_results_{size}.csv   (all trials)")
+	print(" - optuna_best_trial.csv (best parameters)")
+
+	# 1) Optimization history
+	fig1 = viz.plot_optimization_history(study)
+	fig1.show()
+
+	# 2) Parameter importance
+	fig2 = viz.plot_param_importances(study)
+	fig2.show()
+
+	# 3) Parallel coordinate plot (see tradeoffs)
+	fig3 = viz.plot_parallel_coordinate(study)
+	fig3.show()
+
+	# 4) Slice plot (effect of each hyperparam on objective)
+	fig4 = viz.plot_slice(study)
+	fig4.show()
+
+	# 5) Contour plot (pairwise interactions)
+	fig5 = viz.plot_contour(study)
+	fig5.show()

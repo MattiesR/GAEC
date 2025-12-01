@@ -28,7 +28,7 @@ class r0877229:
 	population_size = 100
 
 	""" Variation params """
-	crossover_rate = 0.95
+	crossover_rate = 0.85
 	mutation_rate = 0.3
 	mutation_patience = 50
 	mutation_increase = 0.05	
@@ -58,7 +58,7 @@ class r0877229:
 
 	""" Local search params """
 	local_search_probability = 0.3
-	K_lso = 40				# Number of neirest_neighbours
+	K_lso = 12				# Number of neirest_neighbours
 	max_improvement_lso = 20
 
 	# -------------------
@@ -371,9 +371,77 @@ class r0877229:
 	""" Variation steps """
 	def crossover(self, parent1, parent2):
 		if np.random.rand() < self.crossover_rate:
-			return ordered_crossover(parent1, parent2)
+			# return ordered_crossover(parent1, parent2)
+			return epx_crossover(parent1, parent2)
+			# return self.edge_recombination(parent1, parent2)
+			# return erx_fast(parent1,parent2)
 		return parent1.copy()
+		
+	def edge_recombination(self,parent1, parent2):
+		"""
+		Edge Recombination Crossover (ERX).
+		parent1, parent2: sequences (numpy arrays or lists) of city ids.
+		returns a numpy array child of dtype int32 with same length.
+		"""
+		# convert parents to plain lists of Python ints
+		p1 = list(map(int, parent1))
+		p2 = list(map(int, parent2))
+		size = len(p1)
 
+		# Build adjacency map: city -> set(neighbors)
+		adj = {}
+		for p in (p1, p2):
+			for i, city in enumerate(p):
+				if city not in adj:
+					adj[city] = set()
+				left = p[i-1]            # wrap-around
+				right = p[(i+1) % size]
+				adj[city].add(left)
+				adj[city].add(right)
+
+		# Child construction
+		child = []
+		used = set()
+
+		# Start from a randomly chosen city (could choose p1[0] or random)
+		current = int(np.random.choice(p1))  # random start from parent1
+		while len(child) < size:
+			child.append(current)
+			used.add(current)
+
+			# Remove current from adjacency lists
+			for nbrs in adj.values():
+				if current in nbrs:
+					nbrs.discard(current)
+
+			# If all cities are used, break
+			if len(child) >= size:
+				break
+
+			# Candidate neighbors (remaining neighbors of current) sorted by their adjacency size
+			remaining_neighbors = [n for n in adj[current] if n not in used] if current in adj else []
+
+			if remaining_neighbors:
+				# choose the neighbor with fewest neighbors (degree). Break ties randomly.
+				min_deg = None
+				candidates = []
+				for n in remaining_neighbors:
+					deg = len([x for x in adj.get(n, set()) if x not in used])
+					if (min_deg is None) or (deg < min_deg):
+						min_deg = deg
+						candidates = [n]
+					elif deg == min_deg:
+						candidates.append(n)
+				current = int(np.random.choice(candidates))
+			else:
+				# no neighbors left -> pick a random unused city
+				unused = [c for c in p1 if c not in used]
+				if not unused:
+					# fallback: include any city not used (shouldn't really happen)
+					unused = [c for c in adj.keys() if c not in used]
+				current = int(np.random.choice(unused))
+
+		return np.array(child, dtype=np.int32)
 
 	def mutate(self, individual):
 		if np.random.rand() < self.mutation_rate:
@@ -527,3 +595,133 @@ def two_opt_fast(route, distance_matrix,
 			if improved:
 				break  # restart outer loop after first improvement
 	return route
+
+
+@njit
+def build_adj_list(parent1, parent2):
+    n = len(parent1)
+    adj = -np.ones((n, 4), dtype=np.int32)
+    deg = np.zeros(n, dtype=np.int32)
+
+    def add_edge(i, j):
+        for k in range(deg[i]):
+            if adj[i, k] == j:
+                return
+        if deg[i] < 4:
+            adj[i, deg[i]] = j
+            deg[i] += 1
+
+    for i in range(n):
+        a = parent1[i]
+        b = parent1[(i + 1) % n]
+        add_edge(a, b)
+        add_edge(b, a)
+
+    for i in range(n):
+        a = parent2[i]
+        b = parent2[(i + 1) % n]
+        add_edge(a, b)
+        add_edge(b, a)
+
+    return adj, deg
+
+
+@njit
+def remove_node(adj, deg, node):
+    n = adj.shape[0]
+    for i in range(n):
+        d = deg[i]
+        for k in range(d):
+            if adj[i, k] == node:
+                deg[i] -= 1
+                adj[i, k] = adj[i, deg[i]]
+                adj[i, deg[i]] = -1
+                break
+
+@njit
+def erx_choose_next(current, used, adj, deg):
+    best = -1
+    best_deg = 999999
+
+    for k in range(deg[current]):
+        nb = adj[current, k]
+        if not used[nb] and deg[nb] < best_deg:
+            best_deg = deg[nb]
+            best = nb
+
+    if best != -1:
+        return best
+
+    n = len(used)
+    while True:
+        c = np.random.randint(0, n)
+        if not used[c]:
+            return c
+
+@njit
+def epx_choose_next(current, used, adj, deg):
+    d = deg[current]
+    if d > 0:
+        # gather usable neighbors
+        tmp = [-1, -1, -1, -1]
+        count = 0
+        for k in range(d):
+            nb = adj[current, k]
+            if not used[nb]:
+                tmp[count] = nb
+                count += 1
+
+        if count > 0:
+            return tmp[np.random.randint(0, count)]
+
+    # fallback: random unused
+    n = len(used)
+    while True:
+        c = np.random.randint(0, n)
+        if not used[c]:
+            return c
+
+
+@njit
+def erx_fast(parent1, parent2):
+    n = len(parent1)
+    adj, deg = build_adj_list(parent1, parent2)
+
+    child = -np.ones(n, dtype=np.int32)
+    used = np.zeros(n, dtype=np.bool_)
+
+    current = parent1[0]
+    child[0] = current
+    used[current] = True
+    remove_node(adj, deg, current)
+
+    for pos in range(1, n):
+        nxt = erx_choose_next(current, used, adj, deg)
+        child[pos] = nxt
+        used[nxt] = True
+        remove_node(adj, deg, nxt)
+        current = nxt
+
+    return child
+
+@njit
+def epx_crossover(parent1, parent2):
+    n = len(parent1)
+    adj, deg = build_adj_list(parent1, parent2)
+
+    child = -np.ones(n, dtype=np.int32)
+    used = np.zeros(n, dtype=np.bool_)
+
+    current = parent1[np.random.randint(0, n)]
+    child[0] = current
+    used[current] = True
+    remove_node(adj, deg, current)
+
+    for pos in range(1, n):
+        nxt = epx_choose_next(current, used, adj, deg)
+        child[pos] = nxt
+        used[nxt] = True
+        remove_node(adj, deg, nxt)
+        current = nxt
+
+    return child
