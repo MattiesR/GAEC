@@ -60,13 +60,17 @@ class r0877229:
 	K_lso = 12				# Number of neirest_neighbours
 	max_improvement_lso = 20
 
-
+	""" Island diversity"""
+	island_diversity_init = 0.2
+	island_diversity_rules = 0.2
+	
 	# -------------------
 	# Objective function
 	# -------------------
 	best_objective = np.inf
 	mean_objective = np.inf
 	
+
 	def __init__(self, filename=None):
 		# Global-only hyperparameters (instance attributes) 
 		""" Stopping criterea params"""
@@ -79,7 +83,7 @@ class r0877229:
 
 
 		""" Diversity promotion """
-		self.islands = 4				 # 8
+		self.num_islands = 4				 # 8
 		self.migration_interval = 40	 # 100
 
 		""" Diversity per Island """
@@ -107,49 +111,65 @@ class r0877229:
 		)
 
 		# Initialize islands
-		populations = [self.initialize_population(len(distance_matrix), self.population_size//self.islands, distance_matrix)
-					for _ in range(self.islands)]
-		fitnesses = [self.evaluate_population(pop, distance_matrix) for pop in populations]
+		islands_size = self.population_size // self.num_islands
+		islands = [Island(islands_size) for _ in range(self.num_islands)]
 
+		for island in islands:
+			island.initialize(distance_matrix)
+
+		""" HERE REMOVE IT"""
+		for i, isl in enumerate(islands):
+			isl.mut_high = 0.5+(i*0.1)
+		""" ------------- """
 		iteration = 0
 		no_improvement = 0
 
 		while iteration < self.max_iterations:
 
 			# --- Genetic operations per island ---
-			for i in range(self.islands):
-				populations[i], fitnesses[i] = self.next_generation(populations[i], fitnesses[i], distance_matrix)
+			# --- For each island ---
+			for island in islands:
+				# Generate next generation
+				island.next_generation(distance_matrix)
+				
+				# Find best individual in this island
+				best_idx = np.argmin(island.fitness)
+				best_obj = island.fitness[best_idx]
+				
+				# --- Update per-island no_improvement ---
+				if best_obj < island.best_objective:
+					# Improvement found → reset counter
+					island.best_objective = best_obj
+					island.no_improvement = 0
+				else:
+					# No improvement → increment counter
+					island.no_improvement += 1
+				
+				# Adaptive mutation can use the updated counter
+				island.adaptive_mutation()
 
+				
 			# --- Migration ---
 			if iteration % self.migration_interval == 0:
-				self.migrate(populations, fitnesses, distance_matrix)
+				self.migrate(islands, distance_matrix)
 
-			# --- Track global best ---
-			all_fitness = [f for fit in fitnesses for f in fit]
-			flat_population = [ind for pop in populations for ind in pop]
+			# --- Best per island ---
+			best_per_island = [isl.best() for isl in islands]
+
+			# --- Global best ---
+			all_fitness = np.concatenate([isl.fitness for isl in islands])
+			all_population = np.concatenate([isl.population for isl in islands])
 			best_idx = np.argmin(all_fitness)
-			best_solution = flat_population[best_idx]
+			best_solution = all_population[best_idx]
 			best_objective = all_fitness[best_idx]
 			mean_objective = np.mean(all_fitness)
 
-			# --- Track best per island ---
-			best_per_island = []
-			for i in range(self.islands):
-				best_i_idx = np.argmin(fitnesses[i])
-				best_i_solution = populations[i][best_i_idx]
-				best_i_objective = fitnesses[i][best_i_idx]
-				best_per_island.append((best_i_solution, best_i_objective))
 
 			# --- Reporting ---
 			time_left = self.reporter.report(mean_objective, best_objective, best_solution)
 			print("Best per island:")
 			for idx, (_, obj) in enumerate(best_per_island):
 				print(f"  Island {idx}: best objective = {obj}")
-
-			# Adaptive mutation
-			if no_improvement % self.mutation_patience == 0:
-				self.mutation_rate = self.mut_high
-				print(f"Mutation rate increased to: {self.mutation_rate}")
 
 			# Stopping criteria
 			if time_left < 0:
@@ -554,29 +574,74 @@ class r0877229:
 			self.scramble_ratio = 1.0
 		assert self.swap_ratio + self.inversion_ratio + self.scramble_ratio == 1.0
 
-	def migrate(self, populations, fitnesses, distance_matrix, migrants_per_island=1):
-		""" Ring migration: best individual moves to next island. """
-		best_individuals = [pop[np.argmin(fit)] for pop, fit in zip(populations, fitnesses)]
-		for i in range(self.islands):
-			next_island = (i+1) % self.islands
-			for _ in range(migrants_per_island):
-				# replace worst in next island
-				worst_idx = np.argmax(fitnesses[next_island])
-				populations[next_island][worst_idx] = best_individuals[i]
-				# ind_array = np.array([best_individuals[i]], dtype=np.int32)  # shape (1, n_cities)
-				fitnesses[next_island][worst_idx] = self.evaluate_population(populations[next_island], distance_matrix)[0]
 
+	def migrate(self, islands, distance_matrix, migrants_per_island=1):
+		"""
+		Ring migration: best individuals from each island move to the next island.
+		Only recompute fitness for swapped individuals.
+		"""
+		num_islands = len(islands)
+		
+		# get best individual(s) per island
+		best_individuals = [isl.population[np.argmin(isl.fitness)].copy() for isl in islands]
+
+		for i in range(num_islands):
+			next_island = (i + 1) % num_islands
+			
+			for _ in range(migrants_per_island):
+				# find worst individual in the next island
+				worst_idx = np.argmax(islands[next_island].fitness)
+				
+				# replace worst individual with the best from current island
+				islands[next_island].population[worst_idx] = best_individuals[i].copy()
+				
+				# recompute fitness for the swapped individual only
+				islands[next_island].fitness[worst_idx] = islands[next_island].evaluate_population(
+					islands[next_island].population[worst_idx:worst_idx+1], distance_matrix
+				)[0]
+
+
+	# def migrate(self, populations, fitnesses, distance_matrix, migrants_per_island=1):
+	# 	""" Ring migration: best individual moves to next island. """
+	# 	best_individuals = [pop[np.argmin(fit)] for pop, fit in zip(populations, fitnesses)]
+	# 	for i in range(self.num_islands):
+	# 		next_island = (i+1) % self.num_islands
+	# 		for _ in range(migrants_per_island):
+	# 			# replace worst in next island
+	# 			worst_idx = np.argmax(fitnesses[next_island])
+	# 			populations[next_island][worst_idx] = best_individuals[i]
+	# 			# ind_array = np.array([best_individuals[i]], dtype=np.int32)  # shape (1, n_cities)
+	# 			fitnesses[next_island][worst_idx] = self.evaluate_population(populations[next_island], distance_matrix)[0]
 
 class Island(r0877229):
-	""" Island class """
-	def __init__(self, island_idx, pop_size=None):
+	def __init__(self, population_size):
+		""" Island class """
 		super().__init__()
-		self.island_idx = island_idx
-		self.pop_size = pop_size if pop_size is not None else self.population_size // self.islands
-
+		self.population_size = population_size
 		self.population = None
-		self.indiv_rules = None
 		self.fitness = None
+		self.indiv_rules = None
+		self.no_improvement = 0
+		self.best_objective = np.inf
+
+	def initialize(self, distance_matrix):
+		num_cities = distance_matrix.shape[0]
+		self.population = self.initialize_population(num_cities, self.population_size, distance_matrix)
+		self.fitness = self.evaluate_population(self.population, distance_matrix)
+
+	def next_generation(self, distance_matrix):
+		self.population, self.fitness =  super().next_generation(self.population, self.fitness, distance_matrix)
+
+	def adaptive_mutation(self):
+		if self.no_improvement % self.mutation_patience == 0:
+			self.mutation_rate = self.mut_high
+		if self.best_objective > min(self.fitness):
+			# improvement
+			self.mutation_rate = self.mut_low
+
+	def best(self):
+		idx = np.argmin(self.fitness)
+		return self.population[idx], self.fitness[idx]
 
 
 
