@@ -1,26 +1,6 @@
 import Reporter
 import numpy as np
 from numba import njit, prange
-import optuna
-
-class Diagnostics:
-	def __init__(self, enabled=False):
-		self.enabled = enabled
-		if enabled:
-			self.data = {
-				"diversity": [],
-				"mutation_success": [],
-				"crossover_success": []
-			}
-
-	def record(self, **kwargs):
-		if not self.enabled:
-			return
-		for k, v in kwargs.items():
-			self.data[k].append(v)
-
-
-
 
 class r0877229:
 	# -------------------
@@ -89,7 +69,7 @@ class r0877229:
 		if filename is None:
 			filename = self.__class__.__name__
 		self.reporter = Reporter.Reporter(filename)
-		
+
 	
 	# -------------------
 	# Main optimization loop
@@ -111,10 +91,6 @@ class r0877229:
 			island.apply_island_diversity(i, islands_size, self.island_diversity_rules)
 		self.print_islands_rules(islands)
 
-		""" HERE REMOVE IT"""
-		for i, isl in enumerate(islands):
-			isl.mut_high = 0.5+(i*0.1)
-		""" ------------- """
 		iteration = 0
 		no_improvement = 0
 
@@ -168,8 +144,10 @@ class r0877229:
 			# Stopping criteria
 			if time_left < 0:
 				break
+
 			if no_improvement >= self.patience:
 				break
+
 			if best_objective < self.best_objective:
 				no_improvement = 0
 				self.mutation_rate = self.mut_low
@@ -182,19 +160,6 @@ class r0877229:
 			self.mean_objective = mean_objective
 
 			print(f"Iteration: {iteration}, best = {best_objective}, mean= {mean_objective}")
-
-
-			# # Example: compute matrix of inter-island distances
-			# num_islands = len(populations)
-			# dist_matrix = np.zeros((num_islands, num_islands))
-			# for i in range(num_islands):
-			# 	for j in range(i+1, num_islands):
-			# 		d = island_distance(populations[i], populations[j])
-			# 		dist_matrix[i,j] = d
-
-			# print("Inter-island distance matrix:")
-			# print(dist_matrix)
-
 		return 0
 
 
@@ -202,60 +167,71 @@ class r0877229:
 	# -------------------
 	# GA Methods
 	# -------------------
-	"""Initialization algorithms"""
-	def initialize_population(self, num_cities, pop_size, distance_matrix=None):
+	# """Initialization algorithms"""
+	# def initialize_population(self, num_cities, pop_size, distance_matrix=None):
+	# 	"""
+	# 	Initialize the population using multiple strategies.
+	# 	Strategies and ratios are defined as class attributes:
+	# 		self.init_methods = [
+	# 			("random", self.init_random, self.init_random_ratio),
+	# 			("greedy", self.init_greedy, self.init_greedy_ratio),
+	# 			("bfs", self.init_graph_bfs, self.init_bfs_ratio),
+	# 			("dfs", self.init_graph_dfs, self.init_dfs_ratio),
+	# 		]
+	# 	"""
+
+	# 	# Build the list of (method, ratio) dynamically
+	# 	methods = [
+	# 		(self.init_random, self.init_random_ratio),
+	# 		(self.init_greedy, self.init_greedy_ratio),
+	# 		(self.init_graph_bfs, self.init_bfs_ratio),
+	# 		(self.init_graph_dfs, self.init_dfs_ratio),
+	# 		(self.init_vectorized_random, self.init_vectorized_random_ratio)
+	# 	]
+	# 	# Compute number of individuals per method
+	# 	counts = [int(pop_size * ratio) for _, ratio in methods]
+
+	# 	# Fix rounding to make total exactly pop_size
+	# 	remaining = pop_size - sum(counts)
+	# 	if remaining != 0:
+	# 		counts[0] += remaining  # Add the difference to the first method (random)
+
+	# 	""" Print statements"""
+	# 	print("------------------------------")
+	# 	print(f"Initialized population of {pop_size} individuals.")
+	# 	method_names = ["Random", "Greedy", "BFS", "DFS", "random_feasible"]
+	# 	for method, count in zip(method_names, counts):
+	# 		print(f"{method}: {count}")
+	# 	print("------------------------------")
+		
+	# 	"""	-------------- """
+	# 	# Allocate population array
+	# 	population = np.zeros((pop_size, num_cities), dtype=np.int32)
+
+	# 	start_idx = 0
+	# 	for (method, _), count in zip(methods, counts):
+	# 		if count > 0:
+	# 			population[start_idx:start_idx+count] = method(
+	# 				distance_matrix if method != self.init_random else num_cities,	# Construction due to init_random taking other arguments
+	# 				count
+	# 			)
+	# 			start_idx += count
+
+	# 	return population
+
+	def initialize_population(self, num_cities, pop_size, distance_matrix):
 		"""
-		Initialize the population using multiple strategies.
-		Strategies and ratios are defined as class attributes:
-			self.init_methods = [
-				("random", self.init_random, self.init_random_ratio),
-				("greedy", self.init_greedy, self.init_greedy_ratio),
-				("bfs", self.init_graph_bfs, self.init_bfs_ratio),
-				("dfs", self.init_graph_dfs, self.init_dfs_ratio),
-			]
+		Initialize the population using greedy initialization for all individuals,
+		optionally adding noise to diversify solutions.
 		"""
-
-		# Build the list of (method, ratio) dynamically
-		methods = [
-			(self.init_random, self.init_random_ratio),
-			(self.init_greedy, self.init_greedy_ratio),
-			(self.init_graph_bfs, self.init_bfs_ratio),
-			(self.init_graph_dfs, self.init_dfs_ratio),
-			(self.init_vectorized_random, self.init_vectorized_random_ratio)
-		]
-		# Compute number of individuals per method
-		counts = [int(pop_size * ratio) for _, ratio in methods]
-
-		# Fix rounding to make total exactly pop_size
-		remaining = pop_size - sum(counts)
-		if remaining != 0:
-			counts[0] += remaining  # Add the difference to the first method (random)
-
-		""" Print statements"""
 		print("------------------------------")
-		print(f"Initialized population of {pop_size} individuals.")
-		method_names = ["Random", "Greedy", "BFS", "DFS", "random_feasible"]
-		for method, count in zip(method_names, counts):
-			print(f"{method}: {count}")
+		print(f"Initialized population of {pop_size} individuals using Greedy + noise.")
 		print("------------------------------")
 		
-		"""	-------------- """
-		# Allocate population array
-		population = np.zeros((pop_size, num_cities), dtype=np.int32)
-
-		start_idx = 0
-		for (method, _), count in zip(methods, counts):
-			if count > 0:
-				population[start_idx:start_idx+count] = method(
-					distance_matrix if method != self.init_random else num_cities,	# Construction due to init_random taking other arguments
-					count
-				)
-				start_idx += count
-
-		# Shuffle rows to remove ordering bias
-		np.random.shuffle(population)
+		# Directly call the Numba greedy initializer
+		population = init_greedy_numba(distance_matrix, pop_size, num_cities, noise_scale=0.01)
+		
 		return population
-
 
 	# Random
 	def init_random(self, num_cities, pop_size):
@@ -377,70 +353,117 @@ class r0877229:
 		num_individuals = len(population)
 		new_pop = np.zeros_like(population)
 
-		# 1) Preserve top 'elitism' individuals
+		# === 1) ELITISM (Python) ===
 		elitism = int(self.population_size * self.elitism_ratio)
-		if elitism > 0:
-			elite_idx = np.argpartition(fitness, elitism)[:elitism]  # best fitness first
-			new_pop[:elitism] = population[elite_idx]
+		new_pop[:elitism] = elitism_core_numba(population, fitness, elitism)
 
-		# 2) Fill rest of population
+		# === 2-4) Offspring creation loop ===
 		for i in range(elitism, num_individuals):
-			parent1, parent2 = self.select_parents(population, fitness)
-			child = self.crossover(parent1, parent2)
+			# 2) Selection (Numba)
+			parent1, parent2 = tournament_selection_numba(
+				population, fitness, self.k_tournament, 2
+			)
+
+			# 3) Crossover (Python wrapper → Numba inside)
+			child = ordered_crossover_numba(parent1, parent2, self.crossover_rate)
+
+
+			# 4) Mutation (Numba)
 			child = self.mutate(child)
 
-			if np.random.rand() < self.local_search_probability:	# Apply LSO to children 
+			# 5) Local Search Operator (Python wrapper → Numba 2-opt)
+			if np.random.rand() < self.local_search_probability:
 				N = distance_matrix.shape[0]
 				candidate_list = np.zeros((N, self.K_lso), dtype=np.int32)
 				for j in range(N):
-					candidate_list[j] = np.argpartition(distance_matrix[j],self.K_lso)[:self.K_lso]
+					candidate_list[j] = np.argpartition(distance_matrix[j], self.K_lso)[:self.K_lso]
 				child = two_opt_fast(child, distance_matrix, self.max_improvement_lso)
+
 			new_pop[i] = child
 
-		# 3) Elimination step
-		combined_pop = np.vstack([population, new_pop])
+		# === 5) Evaluation phase (Numba, via Python wrapper) ===
+		offspring_fitness = evaluate_population_numba(new_pop, distance_matrix)
 
-		# Compute fitness for offspring (parent fitness known)
-		offspring_fitness = self.evaluate_population(new_pop, distance_matrix)
-		combined_fitness = np.concatenate((fitness, offspring_fitness))
+		# === 6) Elimination phase (Numba) ===
+		new_pop, new_fitness = elimination_numba(
+			population,
+			new_pop,
+			fitness,
+			offspring_fitness,
+			num_individuals
+		)
 
-		best_indices = np.argpartition(combined_fitness,num_individuals)[:num_individuals]
-		# Eliminate the lambda worst => keep lambda best
-		new_pop = combined_pop[best_indices]
-		new_fitness = combined_fitness[best_indices]
 		return new_pop, new_fitness
+
+
+		# 3) Evaluation and Elimination step (Optimized)
+		
+		# Compute fitness for offspring (calls Numba-compiled self.evaluate_population wrapper)
+		offspring_fitness = self.evaluate_population(new_pop, distance_matrix)
+		
+		# --- CALL THE STANDALONE NUMBA FUNCTION HERE ---
+		new_pop, new_fitness = elimination_numba(
+			population,             # Parent population
+			new_pop,                # Offspring population
+			fitness,                # Parent fitness
+			offspring_fitness,      # Offspring fitness
+			num_individuals
+		)
+		return new_pop, new_fitness
+	
+	# def next_generation(self, population, fitness, distance_matrix):
+	# 	num_individuals = len(population)
+
+	# 	# 1) GENERATE OFFSPRING (Replaces the entire slow loop)
+	# 	new_pop = offspring_generation_numba(
+	# 		population, 
+	# 		fitness, 
+	# 		distance_matrix,
+	# 		self.population_size, 
+	# 		self.elitism_ratio, 
+	# 		self.crossover_rate,
+	# 		self.mutation_rate,
+	# 		self.swap_ratio,
+	# 		self.inversion_ratio,
+	# 		self.scramble_ratio, # Make sure this is passed
+	# 		self.k_tournament,
+	# 		self.local_search_probability, 
+	# 		self.K_lso, 
+	# 		self.max_improvement_lso,
+	# 		self.profiler_timings
+	# 	)
+
+	# 	# 2) Evaluation and Elimination
+	# 	offspring_fitness = self.evaluate_population(new_pop, distance_matrix)
+		
+	# 	# Assuming elimination_numba is defined
+	# 	new_pop, new_fitness = elimination_numba(
+	# 		population, new_pop, fitness, offspring_fitness, num_individuals
+	# 	)
+	# 	return new_pop, new_fitness
 
 	""" Selection process """
 	""" k-tournament selection (vectorized, faster for large populations) """
 
 	def select_parents(self, population, fitness):
-		"""
-		Select two parents using k-tournament selection (vectorized with NumPy).
-		Returns copies of parents.
-		"""
-
-		""" 
-			Mixed strategy requires sample with probability from a method 
-			Or by integrating directly in next_generation	
-		"""
-		def tournament():
-			# Choose k random individuals
-			idx = np.random.choice(len(population), self.k_tournament, replace=False)
-			# Pick the one with lowest fitness (TSP: lower cost is better)
-			best_idx = idx[np.argmin(fitness[idx])]
-			return population[best_idx]
-
-		parent1 = tournament()
-		parent2 = tournament()
-		return parent1.copy(), parent2.copy()
+			"""
+			Wrapper for tournament selection, calling the Numba core.
+			"""
+			parent1, parent2 = tournament_selection_numba(
+					population, 
+					fitness, 
+					self.k_tournament, 
+					2
+					)
+			return parent1, parent2
 
 
 
 	""" Variation steps """
 	def crossover(self, parent1, parent2):
 		if np.random.rand() < self.crossover_rate:
-			# return ordered_crossover(parent1, parent2)
-			return epx_crossover(parent1, parent2)
+			return ordered_crossover(parent1, parent2)
+			# return epx_crossover(parent1, parent2)
 			# return self.edge_recombination(parent1, parent2)
 			# return erx_fast(parent1,parent2)
 		return parent1.copy()
@@ -618,7 +641,7 @@ class Island(r0877229):
 	def initialize(self, distance_matrix):
 		num_cities = distance_matrix.shape[0]
 		self.population = self.initialize_population(num_cities, self.population_size, distance_matrix)
-		self.fitness = self.evaluate_population(self.population, distance_matrix)
+		self.fitness = evaluate_population_numba(self.population, distance_matrix)
 
 	def next_generation(self, distance_matrix):
 		self.population, self.fitness =  super().next_generation(self.population, self.fitness, distance_matrix)
@@ -744,14 +767,14 @@ def evaluate_population_numba(population, distance_matrix):
 		fitness[i] = total
 	return fitness
 
-@njit
+@njit(cache=True)
 def swap_mutation(individual):
     """Swap two random positions in the individual."""
     a, b = np.random.randint(0, len(individual), 2)
     individual[a], individual[b] = individual[b], individual[a]
     return individual
 
-@njit
+@njit(cache=True)
 def inversion_mutation(individual):
     """Invert a random segment of the individual."""
     size = len(individual)
@@ -765,7 +788,7 @@ def inversion_mutation(individual):
         b -= 1
     return individual
 
-@njit
+@njit(cache=True)
 def scramble_mutation(individual):
     """Scramble a random segment of the individual."""
     size = len(individual)
@@ -791,51 +814,73 @@ def ordered_crossover(parent1, parent2):
 			child[pointer] = gene
 	return child
 
-@njit
+@njit(cache=True)
+def ordered_crossover_numba(parent1, parent2, crossover_rate):
+	if np.random.rand() < crossover_rate:
+		size = len(parent1)
+		a, b = sorted(np.random.choice(size, 2, replace=False))
+		child = -np.ones(size, dtype=np.int32)
+		child[a:b+1] = parent1[a:b+1]
+		pointer = 0
+		for gene in parent2:
+			if gene not in child:
+				while child[pointer] != -1:
+					pointer += 1
+				child[pointer] = gene
+	else:
+		child = parent1.copy() # Need to copy here instead
+	return child
+
+
+@njit(cache=True)
 def two_opt_fast(route, distance_matrix, 
                  max_improve=10,        # max number of improving swaps
                  candidate_list=None):  # optional list of nearest neighbors
-	"""
-	Implements the 2-opt heuristic using the best-improvement strategy.
-	Assumes route is a 0-based numpy array of city indices.
-	dist is a 2D numpy array (distance matrix).
-	"""
-	N = len(route)
-	improved = True
-	improve_count = 0
+    """
+    Implements the 2-opt heuristic using the best-improvement strategy.
+    Assumes route is a 0-based numpy array of city indices.
+    dist is a 2D numpy array (distance matrix).
+    """
+    N = len(route)
+    improved = True
+    improve_count = 0
 
-	while improved and improve_count < max_improve:
-		improved = False
-		
-		for i in range(N - 1):
-			# Determine candidate js
-			if candidate_list is None:
-				js = range(i + 2, N)  # standard full loop
-			else:
-				js = candidate_list[route[i]]  # only nearest neighbors
-			
-			for j in js:
-				if j <= i + 1 or j >= N:  # skip invalid indices
-					continue
-				
-				# wrap-around edges
-				a = route[i - 1] if i > 0 else route[N - 1]
-				b = route[i]
-				c = route[j]
-				d = route[(j + 1) % N]
-				
-				# compute delta
-				delta = distance_matrix[a, c] + distance_matrix[b, d] - distance_matrix[a, b] - distance_matrix[c, d]
-				
-				if delta < 0:
-					# perform 2-opt swap
-					route[i:j+1] = route[i:j+1][::-1]
-					improved = True
-					improve_count += 1
-					break  # first improvement strategy
-			if improved:
-				break  # restart outer loop after first improvement
-	return route
+    while improved and improve_count < max_improve:
+        improved = False
+        
+        for i in range(N - 1):
+            # Determine candidate js
+            if candidate_list is None:
+                # FIX: Use np.arange to ensure 'js' is a NumPy array.
+                js = np.arange(i + 2, N, dtype=np.int32) # standard full loop
+            else:
+                # route[i] must be used to index into candidate_list
+                # since the candidate list is indexed by city index, not position
+                js = candidate_list[route[i]]  # only nearest neighbors
+            
+            for j in js:
+                if j <= i + 1 or j >= N:  # skip invalid indices
+                    continue
+                
+                # wrap-around edges
+                a = route[i - 1] if i > 0 else route[N - 1]
+                b = route[i]
+                c = route[j]
+                d = route[(j + 1) % N]
+                
+                # compute delta
+                delta = distance_matrix[a, c] + distance_matrix[b, d] - distance_matrix[a, b] - distance_matrix[c, d]
+                
+                if delta < 0:
+                    # perform 2-opt swap
+                    route[i:j+1] = route[i:j+1][::-1]
+                    improved = True
+                    improve_count += 1
+                    break  # first improvement strategy
+            if improved:
+                break  # restart outer loop after first improvement
+    return route
+
 
 @njit(cache=True)
 def build_adj_list(parent1, parent2):
@@ -864,7 +909,6 @@ def build_adj_list(parent1, parent2):
         add_edge(b, a)
 
     return adj, deg
-
 
 @njit(cache=True)
 def remove_node(adj, deg, node):
@@ -964,53 +1008,46 @@ def epx_crossover(parent1, parent2):
     return child
 
 # Initialization
-@njit(cache=True)
+@njit
+def greedy_single_route(noisy_matrix, N):
+    route = np.empty(N, dtype=np.int32)
+    route[0] = 0
+    visited = np.zeros(N, dtype=np.bool_)
+    visited[0] = True
+    current = 0
+
+    for i in range(1, N):
+        min_dist = np.inf
+        next_city = -1
+        for city in range(N):
+            if not visited[city]:
+                dist = noisy_matrix[current, city]
+                if dist < min_dist:
+                    min_dist = dist
+                    next_city = city
+        route[i] = next_city
+        visited[next_city] = True
+        current = next_city
+    return route
+
+# -------------------------------
+# Main initialization function
+# -------------------------------
+@njit(parallel=True, cache=True)
 def init_greedy_numba(distance_matrix, pop_size, N, noise_scale):
     population = np.zeros((pop_size, N), dtype=np.int32)
 
-    # We use prange, so calculations for each route must be independent.
     for k in prange(pop_size):
-        
-        # 1. Thread-safe Noise Calculation (local to this thread/route)
+        # Optional noise
         if noise_scale > 0.0:
-            # Generate a noise multiplier (e.g., in [0.99, 1.01])
             noise = np.random.uniform(1.0 - noise_scale, 1.0 + noise_scale, size=distance_matrix.shape)
             noisy_matrix = distance_matrix * noise
         else:
             noisy_matrix = distance_matrix
-            
-        # 2. Greedy construction logic
-        current = 0 
-        route = np.empty(N, dtype=np.int32)
-        route[0] = current
 
-        visited = np.zeros(N, dtype=np.bool_)
-        visited[current] = True
-        
-        # Loop to fill the rest of the route
-        for i in range(1, N):
-            min_dist = np.inf
-            next_city = -1
-            
-            # Find unvisited city with minimum distance from current
-            for city in range(N):
-                if not visited[city]:
-                    # Use the noisy matrix for distance
-                    dist = noisy_matrix[current, city]
-                    if dist < min_dist:
-                        min_dist = dist
-                        next_city = city
-            
-            # The standard greedy algorithm assumes next_city is always found
-            if next_city != -1:
-                route[i] = next_city
-                visited[next_city] = True
-                current = next_city
-            else:
-                # Fallback only happens if all N-1 cities have been chosen.
-                # Since the loop runs N-1 times, we just break here.
-                break 
-        population[k] = route
+        # Construct route using the helper
+        population[k] = greedy_single_route(noisy_matrix, N)
+
     return population
 
 
@@ -1038,3 +1075,118 @@ def elimination_numba(
     
     # 3. Return the selected population and fitness arrays
     return combined_pop[best_indices], combined_fitness[best_indices]
+
+
+
+
+@njit(cache=True)
+def elitism_core_numba(population, fitness, elitism_count):
+    """
+    Finds the indices of the 'elitism_count' best individuals 
+    based on fitness (assuming lower is better).
+    """
+    if elitism_count > 0:
+        # np.argpartition finds the indices of the best 'elitism_count' fitness values.
+        elite_idx = np.argpartition(fitness, elitism_count)[:elitism_count]
+        return population[elite_idx]
+    
+    # Return an empty array if no elitism is used
+    return np.empty((0, population.shape[1]), dtype=population.dtype)
+
+
+@njit(cache=True)
+def tournament_selection_numba(population, fitness, k_tournament, num_parents):
+    """
+    Performs k-tournament selection and returns the chosen parents.
+    """
+    pop_size = len(population)
+    parents = np.empty((num_parents, population.shape[1]), dtype=population.dtype)
+
+    for p in range(num_parents):
+        # 1. Choose k random indices (Numba-compatible sampling)
+        competitor_indices = np.random.choice(pop_size, size=k_tournament, replace=False)
+        
+        # 2. Find the winner's index (assuming lower fitness is better)
+        winner_index = -1
+        best_fitness = np.inf
+        
+        for idx in competitor_indices:
+            if fitness[idx] < best_fitness:
+                best_fitness = fitness[idx]
+                winner_index = idx
+                
+        parents[p] = population[winner_index]
+
+    # Return parent individuals, not just indices
+    return parents[0], parents[1]
+
+
+# Place this function outside the r0877229 class
+@njit(cache=True)
+def offspring_generation_numba(
+    population, 
+    fitness, 
+    distance_matrix,
+    pop_size, 
+    elitism_ratio, 
+    crossover_rate,
+    mutation_rate,
+    swap_ratio,
+    inversion_ratio,
+    scramble_ratio, # You need to pass all your ratios!
+    k_tournament,
+    local_search_probability, 
+    K_lso, 
+    max_improvement_lso,
+	# NEW ARGUMENT: Pass the timing array by reference
+    timings_array
+):
+	num_individuals = len(population)
+	new_pop = np.zeros_like(population)
+	N = distance_matrix.shape[0]
+
+	# 1) Preserve Elitism
+	elitism = int(pop_size * elitism_ratio)
+	if elitism > 0:
+		# Assuming elitism_core_numba exists and is visible here
+		elite_pop = elitism_core_numba(population, fitness, elitism) 
+		new_pop[:elitism] = elite_pop
+		
+	# 2) Fill rest of population (The critical part)
+	for i in range(elitism, num_individuals):
+		
+		# Selection (Calls standalone Numba function)
+		parent1, parent2 = tournament_selection_numba(
+			population, fitness, k_tournament, 2
+		)
+		# Crossover logic
+		if np.random.rand() < crossover_rate:
+			child = ordered_crossover(parent1, parent2)
+		else:
+			child = parent1.copy() # Need to copy here instead
+
+		# Mutation logic
+		if np.random.rand() < mutation_rate:
+			U = np.random.rand()
+			if U < swap_ratio:
+				# Assuming swap_mutation is a standalone Numba function
+				child = swap_mutation(child)
+			elif U < swap_ratio + inversion_ratio:
+				# Assuming inversion_mutation is a standalone Numba function
+				child = inversion_mutation(child)
+			else:
+				# Assuming scramble_mutation is a standalone Numba function
+				child = scramble_mutation(child)
+
+		# LSO logic
+		if np.random.rand() < local_search_probability:
+			# Prepare candidate list (must be done in Numba if used here)
+			candidate_list = np.zeros((N, K_lso), dtype=np.int32)
+			for j in range(N):
+				candidate_list[j] = np.argpartition(distance_matrix[j], K_lso)[:K_lso]
+			
+			# Assuming two_opt_fast is a standalone Numba function
+			child = two_opt_fast(child, distance_matrix, max_improvement_lso, candidate_list)
+
+		new_pop[i] = child
+	return new_pop
