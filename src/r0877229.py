@@ -76,10 +76,6 @@ class r0877229:
 		""" Stopping criterea params"""
 		self.max_iterations = 1000
 		self.patience = 100
-		#--------------------
-		# Diagnostic flags
-		#--------------------
-		self.DIAGNOSE = False
 
 
 		""" Diversity promotion """
@@ -95,10 +91,6 @@ class r0877229:
 		self.reporter = Reporter.Reporter(filename)
 		
 	
-	def enable_diagnostics(self):
-		self.DIAGNOSE = True
-		self.diag = Diagnostics(self.DIAGNOSE)
-
 	# -------------------
 	# Main optimization loop
 	# -------------------
@@ -112,10 +104,12 @@ class r0877229:
 
 		# Initialize islands
 		islands_size = self.population_size // self.num_islands
-		islands = [Island(islands_size) for _ in range(self.num_islands)]
-
-		for island in islands:
+		islands = [Island(islands_size,i) for i in range(self.num_islands)]
+	
+		for i, island in enumerate(islands):
 			island.initialize(distance_matrix)
+			island.apply_island_diversity(i, islands_size, self.island_diversity_rules)
+		self.print_islands_rules(islands)
 
 		""" HERE REMOVE IT"""
 		for i, isl in enumerate(islands):
@@ -200,11 +194,6 @@ class r0877229:
 
 			# print("Inter-island distance matrix:")
 			# print(dist_matrix)
-
-			# Diagnostic calculations
-			if self.DIAGNOSE:
-				mutation_success = None
-				crossover_success = None
 
 		return 0
 
@@ -298,33 +287,9 @@ class r0877229:
 	
 	# Greedy with optional noise
 	def init_greedy(self, distance_matrix, pop_size, noise_scale=0.01):
-		num_cities = distance_matrix.shape[0]
-		population = np.zeros((pop_size, num_cities), dtype=np.int32)
-
-		# Precompute noisy distance matrix ONCE per population
-		if noise_scale > 0:
-			# Use median distance for scale robustness
-			base_scale = np.median(distance_matrix[np.isfinite(distance_matrix)])
-			noisy_dist = distance_matrix + noise_scale * base_scale * np.random.randn(*distance_matrix.shape)
-		else:
-			noisy_dist = distance_matrix  # pure greedy
-
-		for k in range(pop_size):
-			current = np.random.randint(0, num_cities)
-			visited = [current]
-			unvisited = set(range(num_cities))
-			unvisited.remove(current)
-
-			while unvisited:
-				# Greedy step based on *noisy* distances
-				next_city = min(unvisited, key=lambda j: noisy_dist[current, j])
-				visited.append(next_city)
-				unvisited.remove(next_city)
-				current = next_city
-
-			population[k] = np.array(visited, dtype=np.int32)
-
-		return population
+			N = distance_matrix.shape[0]
+			# --- Call the Numba function here ---
+			return init_greedy_numba(distance_matrix, pop_size, N, noise_scale)
 
 
 
@@ -415,7 +380,7 @@ class r0877229:
 		# 1) Preserve top 'elitism' individuals
 		elitism = int(self.population_size * self.elitism_ratio)
 		if elitism > 0:
-			elite_idx = np.argsort(fitness)[:elitism]  # best fitness first
+			elite_idx = np.argpartition(fitness, elitism)[:elitism]  # best fitness first
 			new_pop[:elitism] = population[elite_idx]
 
 		# 2) Fill rest of population
@@ -428,7 +393,7 @@ class r0877229:
 				N = distance_matrix.shape[0]
 				candidate_list = np.zeros((N, self.K_lso), dtype=np.int32)
 				for j in range(N):
-					candidate_list[j] = np.argsort(distance_matrix[j])[:self.K_lso]
+					candidate_list[j] = np.argpartition(distance_matrix[j],self.K_lso)[:self.K_lso]
 				child = two_opt_fast(child, distance_matrix, self.max_improvement_lso)
 			new_pop[i] = child
 
@@ -439,7 +404,7 @@ class r0877229:
 		offspring_fitness = self.evaluate_population(new_pop, distance_matrix)
 		combined_fitness = np.concatenate((fitness, offspring_fitness))
 
-		best_indices = np.argsort(combined_fitness)[:num_individuals]
+		best_indices = np.argpartition(combined_fitness,num_individuals)[:num_individuals]
 		# Eliminate the lambda worst => keep lambda best
 		new_pop = combined_pop[best_indices]
 		new_fitness = combined_fitness[best_indices]
@@ -600,24 +565,50 @@ class r0877229:
 					islands[next_island].population[worst_idx:worst_idx+1], distance_matrix
 				)[0]
 
+	def print_islands_rules(self, islands):
+		"""
+		Print all island hyperparameters in a table.
+		"""
+		headers = [
+		"Island", "Pop", "MutRate", "CrossRate",
+		"Swap", "Inv", "Scramble",
+		"Greedy", "Random", "BFS", "DFS", "VectRand",
+		"LocSearch", "MutPat", "MutHigh", "MutLow"
+		]
 
-	# def migrate(self, populations, fitnesses, distance_matrix, migrants_per_island=1):
-	# 	""" Ring migration: best individual moves to next island. """
-	# 	best_individuals = [pop[np.argmin(fit)] for pop, fit in zip(populations, fitnesses)]
-	# 	for i in range(self.num_islands):
-	# 		next_island = (i+1) % self.num_islands
-	# 		for _ in range(migrants_per_island):
-	# 			# replace worst in next island
-	# 			worst_idx = np.argmax(fitnesses[next_island])
-	# 			populations[next_island][worst_idx] = best_individuals[i]
-	# 			# ind_array = np.array([best_individuals[i]], dtype=np.int32)  # shape (1, n_cities)
-	# 			fitnesses[next_island][worst_idx] = self.evaluate_population(populations[next_island], distance_matrix)[0]
+		# Print header
+		print(" | ".join(f"{h:>9}" for h in headers))
+		print("-" * 140)
+
+		for isl in islands:
+			row = [
+				getattr(isl, "idx", "?"),
+				isl.population_size,
+				f"{isl.mutation_rate:.3f}",
+				f"{isl.crossover_rate:.3f}",
+				f"{isl.swap_ratio:.3f}",
+				f"{isl.inversion_ratio:.3f}",
+				f"{isl.scramble_ratio:.3f}",
+				f"{isl.init_greedy_ratio:.3f}",
+				f"{isl.init_random_ratio:.3f}",
+				f"{isl.init_bfs_ratio:.3f}",
+				f"{isl.init_dfs_ratio:.3f}",
+				f"{isl.init_vectorized_random_ratio:.3f}",
+				f"{isl.local_search_probability:.3f}",
+				isl.mutation_patience,
+				f"{isl.mut_high:.3f}",
+				f"{isl.mut_low:.3f}"
+			]
+			print(" | ".join(f"{str(r):>9}" for r in row))
+
+
 
 class Island(r0877229):
-	def __init__(self, population_size):
+	def __init__(self, population_size, idx=None):
 		""" Island class """
 		super().__init__()
 		self.population_size = population_size
+		self.idx = idx
 		self.population = None
 		self.fitness = None
 		self.indiv_rules = None
@@ -633,30 +624,89 @@ class Island(r0877229):
 		self.population, self.fitness =  super().next_generation(self.population, self.fitness, distance_matrix)
 
 	def adaptive_mutation(self):
-		if self.no_improvement % self.mutation_patience == 0:
-			self.mutation_rate = self.mut_high
-		if self.best_objective > min(self.fitness):
-			# improvement
+		current_best = min(self.fitness)
+		if current_best < self.best_objective:
+			# Improvement found
+			self.best_objective = current_best
+			self.no_improvement = 0
 			self.mutation_rate = self.mut_low
+		else:
+			self.no_improvement += 1
+			if self.no_improvement >= self.mutation_patience:
+				self.mutation_rate = self.mut_high
+				# print(f"Island {self.idx}: Mutation rate increased to {self.mutation_rate}")
 
 	def best(self):
 		idx = np.argmin(self.fitness)
 		return self.population[idx], self.fitness[idx]
 
+	def apply_island_diversity(self, island_idx, num_islands, diversity_scale=0.2):
+		"""
+		Scale hyperparameters per island using linear + random factor.
+		Ensures ratios sum to 1 for initialization and mutation operators.
+		"""
+		# -------------------
+		# Factor for diversity
+		# -------------------
+		base_factor = island_idx / max(1, num_islands - 1)
+		random_offset = np.random.uniform(-diversity_scale, diversity_scale)
+		factor = np.clip(base_factor + random_offset, 0, 1)
+
+		# -------------------
+		# Variation parameters
+		# -------------------
+		self.mutation_rate = self.mut_low + factor * (self.mut_high - self.mut_low)
+		self.crossover_rate = self.crossover_rate * (0.8 + 0.4*factor)
+
+		# -------------------
+		# Initialization ratios
+		# -------------------
+		self.init_greedy_ratio = max(0, self.init_greedy_ratio - factor*0.5)
+		self.init_random_ratio = max(0, self.init_random_ratio + factor*0.5)
+
+		init_ratios = np.array([
+			self.init_greedy_ratio,
+			self.init_random_ratio,
+			self.init_bfs_ratio,
+			self.init_dfs_ratio,
+			self.init_vectorized_random_ratio
+		])
+		init_ratios /= init_ratios.sum()  # normalize
+		(
+			self.init_greedy_ratio,
+			self.init_random_ratio,
+			self.init_bfs_ratio,
+			self.init_dfs_ratio,
+			self.init_vectorized_random_ratio
+		) = init_ratios
+		
+		
+		# -------------------
+		# Selection params
+		# -------------------
+		self.k_tournament = max(1, int(self.k_tournament * (1 + 0.2 * diversity_scale)))
+		self.elitism_ratio = min(0.5, self.elitism_ratio * (1 + 0.2 * diversity_scale))
+		
+		# -------------------
+		# Mutation operator ratios
+		# -------------------
+		swap = max(0, self.swap_ratio * (1 - 0.2*factor))
+		inversion = max(0, self.inversion_ratio * (1 + 0.1*factor))
+		scramble = max(0, self.scramble_ratio)  # keep as-is or perturb slightly
+
+		mut_ratios = np.array([swap, inversion, scramble])
+		mut_ratios /= mut_ratios.sum()  # normalize
+		self.swap_ratio, self.inversion_ratio, self.scramble_ratio = mut_ratios
+
+		# -------------------
+		# Local search probability
+		# -------------------
+		self.local_search_probability *= (0.8 + 0.4*factor)
+		self.K_lso = max(1, int(self.K_lso * (1 + 0.2 * diversity_scale)))
+		self.max_improvement_lso = max(1, int(self.max_improvement_lso * (1 + 0.2 * diversity_scale)))
 
 
 
-
-# -------------------
-# Diagnostic functions
-# -------------------
-def compute_diversity(population):
-	# Hamming distance != edge
-	return np.mean([
-		np.sum(population[i] != population[j])
-		for i in range(len(population))
-		for j in range(i+1, len(population))
-	])
 
 def edge_set(tour):
     n = len(tour)
@@ -787,8 +837,7 @@ def two_opt_fast(route, distance_matrix,
 				break  # restart outer loop after first improvement
 	return route
 
-
-@njit
+@njit(cache=True)
 def build_adj_list(parent1, parent2):
     n = len(parent1)
     adj = -np.ones((n, 4), dtype=np.int32)
@@ -817,7 +866,7 @@ def build_adj_list(parent1, parent2):
     return adj, deg
 
 
-@njit
+@njit(cache=True)
 def remove_node(adj, deg, node):
     n = adj.shape[0]
     for i in range(n):
@@ -829,7 +878,7 @@ def remove_node(adj, deg, node):
                 adj[i, deg[i]] = -1
                 break
 
-@njit
+@njit(cache=True)
 def erx_choose_next(current, used, adj, deg):
     best = -1
     best_deg = 999999
@@ -849,7 +898,7 @@ def erx_choose_next(current, used, adj, deg):
         if not used[c]:
             return c
 
-@njit
+@njit(cache=True)
 def epx_choose_next(current, used, adj, deg):
     d = deg[current]
     if d > 0:
@@ -861,10 +910,8 @@ def epx_choose_next(current, used, adj, deg):
             if not used[nb]:
                 tmp[count] = nb
                 count += 1
-
         if count > 0:
             return tmp[np.random.randint(0, count)]
-
     # fallback: random unused
     n = len(used)
     while True:
@@ -873,7 +920,7 @@ def epx_choose_next(current, used, adj, deg):
             return c
 
 
-@njit
+@njit(cache=True)
 def erx_fast(parent1, parent2):
     n = len(parent1)
     adj, deg = build_adj_list(parent1, parent2)
@@ -895,7 +942,7 @@ def erx_fast(parent1, parent2):
 
     return child
 
-@njit
+@njit(cache=True)
 def epx_crossover(parent1, parent2):
     n = len(parent1)
     adj, deg = build_adj_list(parent1, parent2)
@@ -914,5 +961,80 @@ def epx_crossover(parent1, parent2):
         used[nxt] = True
         remove_node(adj, deg, nxt)
         current = nxt
-
     return child
+
+# Initialization
+@njit(cache=True)
+def init_greedy_numba(distance_matrix, pop_size, N, noise_scale):
+    population = np.zeros((pop_size, N), dtype=np.int32)
+
+    # We use prange, so calculations for each route must be independent.
+    for k in prange(pop_size):
+        
+        # 1. Thread-safe Noise Calculation (local to this thread/route)
+        if noise_scale > 0.0:
+            # Generate a noise multiplier (e.g., in [0.99, 1.01])
+            noise = np.random.uniform(1.0 - noise_scale, 1.0 + noise_scale, size=distance_matrix.shape)
+            noisy_matrix = distance_matrix * noise
+        else:
+            noisy_matrix = distance_matrix
+            
+        # 2. Greedy construction logic
+        current = 0 
+        route = np.empty(N, dtype=np.int32)
+        route[0] = current
+
+        visited = np.zeros(N, dtype=np.bool_)
+        visited[current] = True
+        
+        # Loop to fill the rest of the route
+        for i in range(1, N):
+            min_dist = np.inf
+            next_city = -1
+            
+            # Find unvisited city with minimum distance from current
+            for city in range(N):
+                if not visited[city]:
+                    # Use the noisy matrix for distance
+                    dist = noisy_matrix[current, city]
+                    if dist < min_dist:
+                        min_dist = dist
+                        next_city = city
+            
+            # The standard greedy algorithm assumes next_city is always found
+            if next_city != -1:
+                route[i] = next_city
+                visited[next_city] = True
+                current = next_city
+            else:
+                # Fallback only happens if all N-1 cities have been chosen.
+                # Since the loop runs N-1 times, we just break here.
+                break 
+        population[k] = route
+    return population
+
+
+@njit(cache=True)
+def elimination_numba(
+    population_old, 
+    population_new, 
+    fitness_old, 
+    fitness_new, 
+    num_individuals
+):
+    """
+    Performs the (mu + lambda) selection elimination step to choose the best 
+    individuals from the combined parent and offspring populations.
+    """
+    
+    # 1. Combine population and fitness arrays
+    combined_pop = np.vstack((population_old, population_new))
+    combined_fitness = np.concatenate((fitness_old, fitness_new))
+    
+    # 2. Select the best mu individuals using argpartition
+    # np.argpartition is a highly optimized NumPy function (works great in Numba)
+    # It efficiently finds the indices of the 'num_individuals' best fitness values.
+    best_indices = np.argpartition(combined_fitness, num_individuals)[:num_individuals]
+    
+    # 3. Return the selected population and fitness arrays
+    return combined_pop[best_indices], combined_fitness[best_indices]
