@@ -36,13 +36,13 @@ class r0877229:
 	scramble_ratio = 0.10 	# Occasional low probability
 
 	""" Local search params """
-	local_search_probability = 0.3
+	local_search_probability = 0.5
 	K_lso = 12				# Number of neirest_neighbours
 	max_improvement_lso = 20
 
 	""" Island diversity"""
 	island_diversity_init = 0.2
-	island_diversity_rules = 0.2
+	island_diversity_rules = 0.5
 	
 	# -------------------
 	# Objective function
@@ -54,13 +54,13 @@ class r0877229:
 	def __init__(self, filename=None):
 		# Global-only hyperparameters (instance attributes) 
 		""" Stopping criterea params"""
-		self.max_iterations = 1000
-		self.patience = 100
+		self.max_iterations = 1e9
+		self.patience = 1e3
 
 
 		""" Diversity promotion """
-		self.num_islands = 4				 # 8
-		self.migration_interval = 40	 # 100
+		self.num_islands = 8				 # 8
+		self.migration_interval = 100	 # 100
 
 		""" Diversity per Island """
 		self.island_diversity_init = 0.2  # Diversity in the initialization of islands
@@ -143,9 +143,12 @@ class r0877229:
 
 			# Stopping criteria
 			if time_left < 0:
+				print("Ran out of time")
 				break
 
 			if no_improvement >= self.patience:
+				print("Out of patience")
+				print("Nuclear bomb comming soon")
 				break
 
 			if best_objective < self.best_objective:
@@ -365,20 +368,16 @@ class r0877229:
 			)
 
 			# 3) Crossover (Python wrapper → Numba inside)
-			child = ordered_crossover_numba(parent1, parent2, self.crossover_rate)
-
+			# child = ordered_crossover_numba(parent1, parent2, self.crossover_rate)	# SLIGHTEST OVERHEAD
+			child = self.crossover(parent1,parent2)
 
 			# 4) Mutation (Numba)
 			child = self.mutate(child)
 
 			# 5) Local Search Operator (Python wrapper → Numba 2-opt)
 			if np.random.rand() < self.local_search_probability:
-				N = distance_matrix.shape[0]
-				candidate_list = np.zeros((N, self.K_lso), dtype=np.int32)
-				for j in range(N):
-					candidate_list[j] = np.argpartition(distance_matrix[j], self.K_lso)[:self.K_lso]
 				child = two_opt_fast(child, distance_matrix, self.max_improvement_lso)
-
+				# child = segment_swap_delta_safe(child, distance_matrix, max_improvement=10, segment_length=5)
 			new_pop[i] = child
 
 		# === 5) Evaluation phase (Numba, via Python wrapper) ===
@@ -396,20 +395,6 @@ class r0877229:
 		return new_pop, new_fitness
 
 
-		# 3) Evaluation and Elimination step (Optimized)
-		
-		# Compute fitness for offspring (calls Numba-compiled self.evaluate_population wrapper)
-		offspring_fitness = self.evaluate_population(new_pop, distance_matrix)
-		
-		# --- CALL THE STANDALONE NUMBA FUNCTION HERE ---
-		new_pop, new_fitness = elimination_numba(
-			population,             # Parent population
-			new_pop,                # Offspring population
-			fitness,                # Parent fitness
-			offspring_fitness,      # Offspring fitness
-			num_individuals
-		)
-		return new_pop, new_fitness
 	
 	# def next_generation(self, population, fitness, distance_matrix):
 	# 	num_individuals = len(population)
@@ -462,8 +447,8 @@ class r0877229:
 	""" Variation steps """
 	def crossover(self, parent1, parent2):
 		if np.random.rand() < self.crossover_rate:
-			return ordered_crossover(parent1, parent2)
-			# return epx_crossover(parent1, parent2)
+			# return ordered_crossover(parent1, parent2)
+			return epx_crossover(parent1, parent2)
 			# return self.edge_recombination(parent1, parent2)
 			# return erx_fast(parent1,parent2)
 		return parent1.copy()
@@ -814,23 +799,6 @@ def ordered_crossover(parent1, parent2):
 			child[pointer] = gene
 	return child
 
-@njit(cache=True)
-def ordered_crossover_numba(parent1, parent2, crossover_rate):
-	if np.random.rand() < crossover_rate:
-		size = len(parent1)
-		a, b = sorted(np.random.choice(size, 2, replace=False))
-		child = -np.ones(size, dtype=np.int32)
-		child[a:b+1] = parent1[a:b+1]
-		pointer = 0
-		for gene in parent2:
-			if gene not in child:
-				while child[pointer] != -1:
-					pointer += 1
-				child[pointer] = gene
-	else:
-		child = parent1.copy() # Need to copy here instead
-	return child
-
 
 @njit(cache=True)
 def two_opt_fast(route, distance_matrix, 
@@ -1050,7 +1018,6 @@ def init_greedy_numba(distance_matrix, pop_size, N, noise_scale):
 
     return population
 
-
 @njit(cache=True)
 def elimination_numba(
     population_old, 
@@ -1121,72 +1088,46 @@ def tournament_selection_numba(population, fitness, k_tournament, num_parents):
     return parents[0], parents[1]
 
 
-# Place this function outside the r0877229 class
-@njit(cache=True)
-def offspring_generation_numba(
-    population, 
-    fitness, 
-    distance_matrix,
-    pop_size, 
-    elitism_ratio, 
-    crossover_rate,
-    mutation_rate,
-    swap_ratio,
-    inversion_ratio,
-    scramble_ratio, # You need to pass all your ratios!
-    k_tournament,
-    local_search_probability, 
-    K_lso, 
-    max_improvement_lso,
-	# NEW ARGUMENT: Pass the timing array by reference
-    timings_array
-):
-	num_individuals = len(population)
-	new_pop = np.zeros_like(population)
-	N = distance_matrix.shape[0]
 
-	# 1) Preserve Elitism
-	elitism = int(pop_size * elitism_ratio)
-	if elitism > 0:
-		# Assuming elitism_core_numba exists and is visible here
-		elite_pop = elitism_core_numba(population, fitness, elitism) 
-		new_pop[:elitism] = elite_pop
-		
-	# 2) Fill rest of population (The critical part)
-	for i in range(elitism, num_individuals):
-		
-		# Selection (Calls standalone Numba function)
-		parent1, parent2 = tournament_selection_numba(
-			population, fitness, k_tournament, 2
-		)
-		# Crossover logic
-		if np.random.rand() < crossover_rate:
-			child = ordered_crossover(parent1, parent2)
-		else:
-			child = parent1.copy() # Need to copy here instead
 
-		# Mutation logic
-		if np.random.rand() < mutation_rate:
-			U = np.random.rand()
-			if U < swap_ratio:
-				# Assuming swap_mutation is a standalone Numba function
-				child = swap_mutation(child)
-			elif U < swap_ratio + inversion_ratio:
-				# Assuming inversion_mutation is a standalone Numba function
-				child = inversion_mutation(child)
-			else:
-				# Assuming scramble_mutation is a standalone Numba function
-				child = scramble_mutation(child)
+@njit
+def segment_swap_delta_safe(route, distance_matrix, max_improvement=10, segment_length=2):
+    N = route.shape[0]
+    length = 0.0
+    for k in range(N):
+        length += distance_matrix[route[k], route[(k+1)%N]]
 
-		# LSO logic
-		if np.random.rand() < local_search_probability:
-			# Prepare candidate list (must be done in Numba if used here)
-			candidate_list = np.zeros((N, K_lso), dtype=np.int32)
-			for j in range(N):
-				candidate_list[j] = np.argpartition(distance_matrix[j], K_lso)[:K_lso]
-			
-			# Assuming two_opt_fast is a standalone Numba function
-			child = two_opt_fast(child, distance_matrix, max_improvement_lso, candidate_list)
+    improvements = 0
+    attempts = 0
+    max_attempts = 1000  # prevent infinite loops
 
-		new_pop[i] = child
-	return new_pop
+    while improvements < max_improvement and attempts < max_attempts:
+        attempts += 1
+        i = np.random.randint(0, N - segment_length + 1)
+        j = np.random.randint(0, N - segment_length + 1)
+        if abs(i - j) < segment_length:
+            continue
+
+        # Neighbors
+        a = route[i-1] if i > 0 else route[N-1]
+        b = route[i+segment_length] if (i+segment_length) < N else route[0]
+        x = route[j-1] if j > 0 else route[N-1]
+        y = route[j+segment_length] if (j+segment_length) < N else route[0]
+
+        # Delta
+        old_edges = distance_matrix[a, route[i]] + distance_matrix[route[i+segment_length-1], b] + \
+                    distance_matrix[x, route[j]] + distance_matrix[route[j+segment_length-1], y]
+        new_edges = distance_matrix[a, route[j]] + distance_matrix[route[j+segment_length-1], b] + \
+                    distance_matrix[x, route[i]] + distance_matrix[route[i+segment_length-1], y]
+
+        delta = new_edges - old_edges
+
+        if delta < 0:
+            # Swap safely
+            temp = route[i:i+segment_length].copy()
+            route[i:i+segment_length] = route[j:j+segment_length]
+            route[j:j+segment_length] = temp
+            length += delta
+            improvements += 1
+
+    return route

@@ -3,7 +3,7 @@ import r0877229
 
 import cProfile
 import pstats
-size = 750
+size = 250
 filename = f"src/data/tour{size}.csv"
 
 
@@ -21,6 +21,7 @@ print("WE WARMED UP")
 
 
 solver = r0877229.r0877229(filename)
+
 cProfile.run(f"solver.optimize('{filename}')", "profiler_output.prof")
 
 
