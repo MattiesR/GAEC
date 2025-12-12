@@ -25,7 +25,7 @@ class r0877229:
 	init_dfs_ratio = 0.0
 	init_vectorized_random_ratio = 0.0
 	""" Selection params """
-	k_tournament = 2
+	k_tournament = 5
 	elitism_ratio = 0.001	# Default as 5%
 	
 	""" Variation params """
@@ -36,9 +36,9 @@ class r0877229:
 	scramble_ratio = 0.10 	# Occasional low probability
 
 	""" Local search params """
-	local_search_probability = 0.5
+	local_search_probability = 1.0
 	K_lso = 12				# Number of neirest_neighbours
-	max_improvement_lso = 20
+	max_improvement_lso = 50
 
 	""" Island diversity"""
 	island_diversity_init = 0.2
@@ -55,12 +55,12 @@ class r0877229:
 		# Global-only hyperparameters (instance attributes) 
 		""" Stopping criterea params"""
 		self.max_iterations = 1e9
-		self.patience = 1e3
+		self.patience = 1e2
 
 
 		""" Diversity promotion """
 		self.num_islands = 8				 # 8
-		self.migration_interval = 100	 # 100
+		self.migration_interval = 500	 # 100
 
 		""" Diversity per Island """
 		self.island_diversity_init = 0.2  # Diversity in the initialization of islands
@@ -118,7 +118,6 @@ class r0877229:
 				# Adaptive mutation can use the updated counter
 				island.adaptive_mutation()
 
-				
 			# --- Migration ---
 			if iteration % self.migration_interval == 0:
 				self.migrate(islands, distance_matrix)
@@ -220,9 +219,9 @@ class r0877229:
 	# 			)
 	# 			start_idx += count
 
-	# 	return population
+		# return population
 
-	def initialize_population(self, num_cities, pop_size, distance_matrix):
+	def initialize_population(self, pop_size, distance_matrix):
 		"""
 		Initialize the population using greedy initialization for all individuals,
 		optionally adding noise to diversify solutions.
@@ -232,8 +231,8 @@ class r0877229:
 		print("------------------------------")
 		
 		# Directly call the Numba greedy initializer
-		population = init_greedy_numba(distance_matrix, pop_size, num_cities, noise_scale=0.01)
-		
+		population = init_greedy_numba(distance_matrix, pop_size, noise_scale=0.01)
+
 		return population
 
 	# Random
@@ -373,16 +372,18 @@ class r0877229:
 
 			# 4) Mutation (Numba)
 			child = self.mutate(child)
-
+			
 			# 5) Local Search Operator (Python wrapper → Numba 2-opt)
 			if np.random.rand() < self.local_search_probability:
 				child = two_opt_fast(child, distance_matrix, self.max_improvement_lso)
-				# child = segment_swap_delta_safe(child, distance_matrix, max_improvement=10, segment_length=5)
+				child = segment_swap_delta_safe(child, distance_matrix, max_improvement=self.max_improvement_lso, segment_length=6)
+			
 			new_pop[i] = child
 
 		# === 5) Evaluation phase (Numba, via Python wrapper) ===
 		offspring_fitness = evaluate_population_numba(new_pop, distance_matrix)
-
+		
+		normalize_population_numba(new_pop) # In place normalization
 		# === 6) Elimination phase (Numba) ===
 		new_pop, new_fitness = elimination_numba(
 			population,
@@ -391,7 +392,6 @@ class r0877229:
 			offspring_fitness,
 			num_individuals
 		)
-
 		return new_pop, new_fitness
 
 
@@ -624,9 +624,11 @@ class Island(r0877229):
 		self.best_objective = np.inf
 
 	def initialize(self, distance_matrix):
-		num_cities = distance_matrix.shape[0]
-		self.population = self.initialize_population(num_cities, self.population_size, distance_matrix)
+		self.population = self.initialize_population(self.population_size, distance_matrix)
+		normalize_population_numba(self.population) # In place normalization
+
 		self.fitness = evaluate_population_numba(self.population, distance_matrix)
+
 
 	def next_generation(self, distance_matrix):
 		self.population, self.fitness =  super().next_generation(self.population, self.fitness, distance_matrix)
@@ -1002,21 +1004,22 @@ def greedy_single_route(noisy_matrix, N):
 # Main initialization function
 # -------------------------------
 @njit(parallel=True, cache=True)
-def init_greedy_numba(distance_matrix, pop_size, N, noise_scale):
-    population = np.zeros((pop_size, N), dtype=np.int32)
+def init_greedy_numba(distance_matrix, pop_size, noise_scale):
+	N = distance_matrix.shape[0]
+	population = np.zeros((pop_size, N), dtype=np.int32)
 
-    for k in prange(pop_size):
-        # Optional noise
-        if noise_scale > 0.0:
-            noise = np.random.uniform(1.0 - noise_scale, 1.0 + noise_scale, size=distance_matrix.shape)
-            noisy_matrix = distance_matrix * noise
-        else:
-            noisy_matrix = distance_matrix
+	for k in prange(pop_size):
+		# Optional noise
+		if noise_scale > 0.0:
+			noise = np.random.uniform(1.0 - noise_scale, 1.0 + noise_scale, size=distance_matrix.shape)
+			noisy_matrix = distance_matrix * noise
+			noisy_matrix = np.nan_to_num(noisy_matrix, nan=np.inf)	# Makes sure no NaN numbers enter and fail the initialization
+		else:
+			noisy_matrix = distance_matrix
 
-        # Construct route using the helper
-        population[k] = greedy_single_route(noisy_matrix, N)
-
-    return population
+		# Construct route using the helper
+		population[k] = greedy_single_route(noisy_matrix, N)
+	return population
 
 @njit(cache=True)
 def elimination_numba(
@@ -1048,17 +1051,18 @@ def elimination_numba(
 
 @njit(cache=True)
 def elitism_core_numba(population, fitness, elitism_count):
-    """
-    Finds the indices of the 'elitism_count' best individuals 
-    based on fitness (assuming lower is better).
-    """
-    if elitism_count > 0:
-        # np.argpartition finds the indices of the best 'elitism_count' fitness values.
-        elite_idx = np.argpartition(fitness, elitism_count)[:elitism_count]
-        return population[elite_idx]
-    
-    # Return an empty array if no elitism is used
-    return np.empty((0, population.shape[1]), dtype=population.dtype)
+	"""
+	Finds the indices of the 'elitism_count' best individuals 
+	based on fitness (assuming lower is better).
+	"""
+	if elitism_count > 0:
+		# np.argpartition finds the indices of the best 'elitism_count' fitness values.
+		elite_idx = np.argpartition(fitness, elitism_count)[:elitism_count]
+		return population[elite_idx]
+
+	# Return an empty array if no elitism is used
+
+	return np.empty((0, population.shape[1]), dtype=population.dtype)
 
 
 @njit(cache=True)
@@ -1131,3 +1135,24 @@ def segment_swap_delta_safe(route, distance_matrix, max_improvement=10, segment_
             improvements += 1
 
     return route
+
+
+@njit(parallel=True, cache=True)
+def normalize_population_numba(population):
+    pop_size, N = population.shape
+    tmp_pop = np.zeros_like(population)  # initialize to avoid -1
+
+    for k in prange(pop_size):
+        route = population[k]
+        idx0 = 0
+        for i in range(N):
+            if route[i] == 0:
+                idx0 = i
+                break
+        for i in range(N):
+            tmp_pop[k, i] = route[(idx0 + i) % N]
+
+    for k in prange(pop_size):
+        for i in range(N):
+            population[k, i] = tmp_pop[k, i]
+
