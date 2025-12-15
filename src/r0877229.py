@@ -10,7 +10,7 @@ class r0877229:
 	population_size = 200
 
 	""" Variation params """
-	crossover_rate = 0.85
+	crossover_rate = 0.45
 	mutation_rate = 0.3
 	mutation_patience = 50
 	mutation_increase = 0.05	
@@ -21,12 +21,13 @@ class r0877229:
 	""" Initialization params """
 	init_random_ratio = 0.0
 	init_greedy_ratio = 1.0
+	noise_init_greedy = 0.04	
 	init_bfs_ratio = 0.0
 	init_dfs_ratio = 0.0
 	init_vectorized_random_ratio = 0.0
 	""" Selection params """
-	k_tournament = 5
-	elitism_ratio = 0.001	# Default as 5%
+	k_tournament = 2
+	elitism_ratio = 0.05	# Default as 5%
 	
 	""" Variation params """
 	
@@ -36,14 +37,28 @@ class r0877229:
 	scramble_ratio = 0.10 	# Occasional low probability
 
 	""" Local search params """
-	local_search_probability = 1.0
-	K_lso = 12				# Number of neirest_neighbours
-	max_improvement_lso = 50
+	local_search_probability = 0.45
+	lso_max = 0.45      # start aggressive
+	lso_min = 0.25    # keep a little LS forever
+
+	max_improv_two_opt = 40
+	max_improv_three_opt = 10
+	max_improv_seg_swap = 40
+    
+
+	min_seg = 2
+	max_seg = 15
+      
 
 	""" Island diversity"""
 	island_diversity_init = 0.2
-	island_diversity_rules = 0.5
+	island_diversity_rules = 0.3
 	
+
+	""" Fitness sharing """
+	fitness_sharing_treshold = 0.35
+	sigma = 0.3
+	alpha = 1.0
 	# -------------------
 	# Objective function
 	# -------------------
@@ -55,12 +70,12 @@ class r0877229:
 		# Global-only hyperparameters (instance attributes) 
 		""" Stopping criterea params"""
 		self.max_iterations = 1e9
-		self.patience = 1e2
+		self.patience = 3e2
 
 
 		""" Diversity promotion """
-		self.num_islands = 8				 # 8
-		self.migration_interval = 500	 # 100
+		self.num_islands = 6				 # 8
+		self.migration_interval = 150	 # 100
 
 		""" Diversity per Island """
 		self.island_diversity_init = 0.2  # Diversity in the initialization of islands
@@ -124,6 +139,8 @@ class r0877229:
 
 			# --- Best per island ---
 			best_per_island = [isl.best() for isl in islands]
+			populations = [isl.population for isl in islands]
+			hamming_divs_per_island = all_islands_diversity_numba(populations)
 
 			# --- Global best ---
 			all_fitness = np.concatenate([isl.fitness for isl in islands])
@@ -137,8 +154,8 @@ class r0877229:
 			# --- Reporting ---
 			time_left = self.reporter.report(mean_objective, best_objective, best_solution)
 			print("Best per island:")
-			for idx, (_, obj) in enumerate(best_per_island):
-				print(f"  Island {idx}: best objective = {obj}")
+			for idx, ((_, obj), hamming) in enumerate(zip(best_per_island, hamming_divs_per_island)):
+				print(f"  Island {idx}: best objective = {obj:.4f}, hamming = {hamming:.4f}")
 
 			# Stopping criteria
 			if time_left < 0:
@@ -160,6 +177,13 @@ class r0877229:
 			# Updating best objectives
 			self.best_objective = best_objective
 			self.mean_objective = mean_objective
+
+			# Adaptively decrease local search 
+			# self.local_search_probability = max(self.lso_min,self.lso_max * (time_left / 300.0))	
+			p = max(0.0, min(1.0, time_left / 300.0))
+			self.local_search_probability = max(self.lso_min, self.lso_max * p * p)
+			for island in islands:
+				island.local_search_probability = self.local_search_probability
 
 			print(f"Iteration: {iteration}, best = {best_objective}, mean= {mean_objective}")
 		return 0
@@ -231,8 +255,8 @@ class r0877229:
 		print("------------------------------")
 		
 		# Directly call the Numba greedy initializer
-		population = init_greedy_numba(distance_matrix, pop_size, noise_scale=0.01)
-
+		population = init_greedy_numba(distance_matrix, pop_size, noise_scale=self.noise_init_greedy)
+		population = local_search_population_2opt(population, distance_matrix, 100)
 		return population
 
 	# Random
@@ -355,34 +379,62 @@ class r0877229:
 		num_individuals = len(population)
 		new_pop = np.zeros_like(population)
 
+
+		# === Diversity check ===
+		global_hamming_diversity = global_hamming_diversity_numba(population)
+
+		use_sharing = global_hamming_diversity < self.fitness_sharing_treshold
+
+		if use_sharing:
+			selection_fitness = fitness_sharing_numba(population, fitness, sigma=self.sigma, alpha=self.alpha)
+		else:
+			selection_fitness = fitness
+                  
 		# === 1) ELITISM (Python) ===
 		elitism = int(self.population_size * self.elitism_ratio)
 		new_pop[:elitism] = elitism_core_numba(population, fitness, elitism)
 
+
+		# === Apply local search on elites ===
+		# For example, 2-opt or 3-opt
+		# for i in range(elitism):
+		# 	if np.random.rand() < self.local_search_probability:  # adaptive probability
+		# 		# Choose which LS: 2-opt or 3-opt
+		# 		new_pop[i] = two_opt_fast(new_pop[i], distance_matrix, max_improve=10)
+			
 		# === 2-4) Offspring creation loop ===
 		for i in range(elitism, num_individuals):
 			# 2) Selection (Numba)
 			parent1, parent2 = tournament_selection_numba(
-				population, fitness, self.k_tournament, 2
+				population, selection_fitness, self.k_tournament, 2
 			)
 
-			# 3) Crossover (Python wrapper → Numba inside)
-			# child = ordered_crossover_numba(parent1, parent2, self.crossover_rate)	# SLIGHTEST OVERHEAD
+			# Variation
 			child = self.crossover(parent1,parent2)
-
-			# 4) Mutation (Numba)
 			child = self.mutate(child)
 			
 			# 5) Local Search Operator (Python wrapper → Numba 2-opt)
 			if np.random.rand() < self.local_search_probability:
-				child = two_opt_fast(child, distance_matrix, self.max_improvement_lso)
-				child = segment_swap_delta_safe(child, distance_matrix, max_improvement=self.max_improvement_lso, segment_length=6)
+				U = np.random.rand()
+				if U < 0.75:
+					child = two_opt_fast(child, distance_matrix, self.max_improv_two_opt)
+				elif 0.75 < U <0.95:
+					N = distance_matrix.shape[0]
+					segment_length = np.random.randint(self.min_seg, min(self.max_seg,N))
+					child = segment_swap_delta_safe(child, distance_matrix, max_improvement=self.max_improv_seg_swap, segment_length=segment_length)
+				else:
+					child = three_opt_fast(child, distance_matrix, self.max_improv_three_opt)
+
+				# child = three_opt_fast(child, distance_matrix, self.max_improvement_lso)
+
 			
 			new_pop[i] = child
+                  
 
 		# === 5) Evaluation phase (Numba, via Python wrapper) ===
 		offspring_fitness = evaluate_population_numba(new_pop, distance_matrix)
-		
+
+
 		normalize_population_numba(new_pop) # In place normalization
 		# === 6) Elimination phase (Numba) ===
 		new_pop, new_fitness = elimination_numba(
@@ -392,40 +444,17 @@ class r0877229:
 			offspring_fitness,
 			num_individuals
 		)
+		# After elimination
+		# if global_hamming_diversity < 0.05:
+		# 	print("Nuke dropped")
+		# 	num_nuke = max(1, int(0.1 * num_individuals))  # 10% worst
+		# 	worst_idx = np.argsort(new_fitness)[-num_nuke:]  # indices of worst
+		# 	for idx in worst_idx:
+		# 		new_pop[idx] = init_greedy_numba(distance_matrix, 1, noise_scale=0.1)[0]
+		# 		new_fitness[idx] = evaluate_individual_numba(new_pop[idx], distance_matrix)
+
 		return new_pop, new_fitness
 
-
-	
-	# def next_generation(self, population, fitness, distance_matrix):
-	# 	num_individuals = len(population)
-
-	# 	# 1) GENERATE OFFSPRING (Replaces the entire slow loop)
-	# 	new_pop = offspring_generation_numba(
-	# 		population, 
-	# 		fitness, 
-	# 		distance_matrix,
-	# 		self.population_size, 
-	# 		self.elitism_ratio, 
-	# 		self.crossover_rate,
-	# 		self.mutation_rate,
-	# 		self.swap_ratio,
-	# 		self.inversion_ratio,
-	# 		self.scramble_ratio, # Make sure this is passed
-	# 		self.k_tournament,
-	# 		self.local_search_probability, 
-	# 		self.K_lso, 
-	# 		self.max_improvement_lso,
-	# 		self.profiler_timings
-	# 	)
-
-	# 	# 2) Evaluation and Elimination
-	# 	offspring_fitness = self.evaluate_population(new_pop, distance_matrix)
-		
-	# 	# Assuming elimination_numba is defined
-	# 	new_pop, new_fitness = elimination_numba(
-	# 		population, new_pop, fitness, offspring_fitness, num_individuals
-	# 	)
-	# 	return new_pop, new_fitness
 
 	""" Selection process """
 	""" k-tournament selection (vectorized, faster for large populations) """
@@ -447,8 +476,10 @@ class r0877229:
 	""" Variation steps """
 	def crossover(self, parent1, parent2):
 		if np.random.rand() < self.crossover_rate:
-			# return ordered_crossover(parent1, parent2)
-			return epx_crossover(parent1, parent2)
+			if np.random.rand() < 0.15:
+				return ordered_crossover(parent1, parent2)
+			else:
+				return epx_crossover(parent1, parent2)
 			# return self.edge_recombination(parent1, parent2)
 			# return erx_fast(parent1,parent2)
 		return parent1.copy()
@@ -712,8 +743,7 @@ class Island(r0877229):
 		# Local search probability
 		# -------------------
 		self.local_search_probability *= (0.8 + 0.4*factor)
-		self.K_lso = max(1, int(self.K_lso * (1 + 0.2 * diversity_scale)))
-		self.max_improvement_lso = max(1, int(self.max_improvement_lso * (1 + 0.2 * diversity_scale)))
+		# self.max_improvement_lso = max(1, int(self.max_improvement_lso * (1 + 0.2 * diversity_scale)))
 
 
 
@@ -753,6 +783,31 @@ def evaluate_population_numba(population, distance_matrix):
 			total += distance_matrix[from_city, to_city]
 		fitness[i] = total
 	return fitness
+
+@njit(cache=True)
+def evaluate_individual_numba(route, distance_matrix):
+    """
+    Computes the total distance of a single TSP tour.
+
+    Parameters
+    ----------
+    route : 1D np.ndarray
+        Array of city indices (0-based) representing the tour.
+    distance_matrix : 2D np.ndarray
+        Symmetric distance matrix between cities.
+
+    Returns
+    -------
+    float
+        Total tour distance.
+    """
+    N = len(route)
+    total = 0.0
+    for i in range(N):
+        a = route[i]
+        b = route[(i + 1) % N]  # wrap around to form a cycle
+        total += distance_matrix[a, b]
+    return total
 
 @njit(cache=True)
 def swap_mutation(individual):
@@ -852,6 +907,94 @@ def two_opt_fast(route, distance_matrix,
     return route
 
 
+@njit(cache=True, parallel=True)
+def local_search_population_2opt(population, distance_matrix, max_improve):
+    pop_size = population.shape[0]
+
+    for i in prange(pop_size):
+        population[i] = two_opt_fast(
+            population[i],
+            distance_matrix,
+            max_improve
+        )
+
+    return population
+
+@njit(cache=True)
+def three_opt_fast(route, distance_matrix, max_improve=5):
+    N = len(route)
+    improve_count = 0
+    improved = True
+
+    while improved and improve_count < max_improve:
+        improved = False
+
+        for i in range(1, N - 4):
+            a = route[i - 1]
+            b = route[i]
+
+            for j in range(i + 2, N - 2):
+                c = route[j - 1]
+                d = route[j]
+
+                for k in range(j + 2, N):
+                    e = route[k - 1]
+                    f = route[k % N]
+
+                    # original cost
+                    old = (
+                        distance_matrix[a, b]
+                        + distance_matrix[c, d]
+                        + distance_matrix[e, f]
+                    )
+
+                    # --- CASE 1: reverse (i:j)
+                    new1 = (
+                        distance_matrix[a, c]
+                        + distance_matrix[b, d]
+                        + distance_matrix[e, f]
+                    )
+
+                    if new1 < old:
+                        route[i:j] = route[i:j][::-1]
+                        improved = True
+                        improve_count += 1
+                        break
+
+                    # --- CASE 2: reverse (j:k)
+                    new2 = (
+                        distance_matrix[a, b]
+                        + distance_matrix[c, e]
+                        + distance_matrix[d, f]
+                    )
+
+                    if new2 < old:
+                        route[j:k] = route[j:k][::-1]
+                        improved = True
+                        improve_count += 1
+                        break
+
+                    # --- CASE 3: reverse (i:k)
+                    new3 = (
+                        distance_matrix[a, c]
+                        + distance_matrix[e, b]
+                        + distance_matrix[d, f]
+                    )
+
+                    if new3 < old:
+                        route[i:k] = route[i:k][::-1]
+                        improved = True
+                        improve_count += 1
+                        break
+
+                if improved:
+                    break
+            if improved:
+                break
+
+    return route
+
+
 @njit(cache=True)
 def build_adj_list(parent1, parent2):
     n = len(parent1)
@@ -879,6 +1022,19 @@ def build_adj_list(parent1, parent2):
         add_edge(b, a)
 
     return adj, deg
+
+@njit(cache=True, parallel=True)
+def local_search_population_3opt(population, distance_matrix, max_improve):
+    pop_size = population.shape[0]
+
+    for i in prange(pop_size):
+        population[i] = three_opt_fast(
+            population[i],
+            distance_matrix,
+            max_improve
+        )
+    return population
+
 
 @njit(cache=True)
 def remove_node(adj, deg, node):
@@ -1103,7 +1259,7 @@ def segment_swap_delta_safe(route, distance_matrix, max_improvement=10, segment_
 
     improvements = 0
     attempts = 0
-    max_attempts = 1000  # prevent infinite loops
+    max_attempts = 50_000  # prevent infinite loops
 
     while improvements < max_improvement and attempts < max_attempts:
         attempts += 1
@@ -1156,3 +1312,81 @@ def normalize_population_numba(population):
         for i in range(N):
             population[k, i] = tmp_pop[k, i]
 
+
+@njit(parallel=True, cache=True)
+def global_hamming_diversity_numba(population):
+    P, N = population.shape
+    total = 0.0
+    count = 0
+
+    for i in prange(P):
+        for j in range(i + 1, P):
+            diff = 0
+            for k in range(N):
+                if population[i, k] != population[j, k]:
+                    diff += 1
+            total += diff / N
+            count += 1
+
+    if count == 0:
+        return 0.0
+    return total / count
+
+
+@njit(parallel=True, cache=True)
+def elite_hamming_diversity_numba(population, elite):
+    P, N = population.shape
+    total = 0.0
+
+    for i in prange(P):
+        diff = 0
+        for k in range(N):
+            if population[i, k] != elite[k]:
+                diff += 1
+        total += diff / N
+
+    return total / P
+
+
+@njit(inline="always")
+def sharing_function_numba(d, sigma, alpha):
+    # assumes d < sigma
+    return 1.0 - (d / sigma) ** alpha
+
+
+@njit(parallel=True, cache=True)
+def fitness_sharing_numba(population, fitness, sigma=0.3, alpha=1.0):
+    P, N = population.shape
+    shared_fitness = np.empty(P, dtype=np.float64)
+
+    for i in prange(P):
+        denom = 0.0
+
+        for j in range(P):
+            if i == j:
+                continue
+
+            diff = 0
+            for k in range(N):
+                if population[i, k] != population[j, k]:
+                    diff += 1
+
+            d = diff / N
+            if d < sigma:
+                denom += sharing_function_numba(d, sigma, alpha)
+
+        # protect against division by zero
+        if denom > 0.0:
+            shared_fitness[i] = fitness[i] / denom
+        else:
+            shared_fitness[i] = fitness[i]
+    return shared_fitness
+
+
+@njit(parallel=True)
+def all_islands_diversity_numba(populations):
+    num_islands = len(populations)
+    divs = np.empty(num_islands)
+    for i in prange(num_islands):
+        divs[i] = global_hamming_diversity_numba(populations[i])
+    return divs

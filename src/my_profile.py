@@ -13,6 +13,7 @@ def check_tour_validity(filename, N=None):
     tours = df.iloc[:, 4:].to_numpy()  # exclude metadata
     pop_size, num_cols = tours.shape
 
+
     if N is None:
         N = num_cols  # number of cities
 
