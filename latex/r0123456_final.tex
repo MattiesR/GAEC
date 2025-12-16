@@ -16,8 +16,8 @@
 \usepackage{cleveref}
 \usepackage{graphicx}
 
-\usepackage{tikz}
-
+\usepackage{tikz}\usetikzlibrary{positioning} % <-- add this
+\usepackage{adjustbox}
 \def\retake{0}
 \newcommand{\switch}[2]{\ifnum\retake=0{#1}\else{#2}\fi}
 
@@ -45,8 +45,8 @@
 \RemoveMe{
 \section*{Formal requirements} \label{sec_this}
 
-The report is structured for fair and efficient grading of around 100 individual projects in the space of only a few days. Please respect the exact structure of this document. You are allowed to remove this section and \cref{sec_other}. Brevity is the soul of wit: a good report will be \textbf{around $8$ pages} long. The hard limit is 10 pages. 
-This \textbf{excludes} the other comments in \cref{sec_other} and the generative AI compliance form in \cref{sec_genai}, which have no page limit.
+The report is structured for fair and efficient grading of around 100 individual projects in the space of only a few days. Please respect the exact structure of this document. You are allowed to remove this section and \ref{sec_other}. Brevity is the soul of wit: a good report will be \textbf{around $8$ pages} long. The hard limit is 10 pages. 
+This \textbf{excludes} the other comments in \ref{sec_other} and the generative AI compliance form in \ref{sec_genai}, which have no page limit.
 
 \begin{quote}
 Think of this report as a \textbf{take-home exam}; it will be used at the exam for structuring the discussion and questions. Make an effort so that it can be visually scanned efficiently, e.g., by using boldface or colors to highlight key points, using lists, clearly defined paragraphs, figures, etc.
@@ -64,10 +64,10 @@ Remove the current section from your final report.
 \section{Metadata}
 
 \begin{itemize}
- \item \textbf{Group members during group phase:} \ReplaceMe{Group member 1} and \ReplaceMe{group member 2}
- \item \textbf{Time spent on group phase:} \ReplaceMe{10 hours}
- \item \textbf{Time spent on final code:} \ReplaceMe{40 hours}
- \item \textbf{Time spent on final report:} \ReplaceMe{10 hours}
+ \item \textbf{Group members during group phase:} Kaixi Yao, Sarthak Janjuha and Julius Jacobitz
+ \item \textbf{Time spent on group phase:} 10 hours
+ \item \textbf{Time spent on final code:} 45 hours
+ \item \textbf{Time spent on final report:} 10 hours
 \end{itemize}
 
 \section{Changes since \switch{the group phase}{your previous submission} \hfill(target: $0.25$ pages)}
@@ -75,7 +75,14 @@ Remove the current section from your final report.
 \ReplaceMe{List the main changes that you implemented since \switch{the group phase}{your previous submission of the project}. You do not need to explain the employed techniques in detail; for this, you should refer to the appropriate subsection of section 3 of the report.}
 
 \begin{enumerate}
- \item \ReplaceMe{State here the modification that you made (e.g., replaced top-$\lambda$ selection with $k$-tournament selection).}
+ \item \ReplaceMe{State here the modification that you made (e.g., replaced top-$\lambda$ selection with $k$-tournament selection).} 
+ \item Replaced the representation from N-1 cities to N cities always starting at city zero.
+ \item Replaced random initialization with a greedy initialization on a noisy distance matrix
+ \item Use OX or EPX as a crossoveroperator with different probability
+ \item Remove original stopping criteria, instead introduce a nuclear bomb when population has converged.
+ \item Added local search operators: symmetric 2-opt, symmetric 3-opt, segment-swaps and Or-opt.
+ \item Added diversity promotion: islands and fitness sharing
+ \item Adaptively adjust diversity promotion and local search
  \item \dots
 \end{enumerate}
 
@@ -89,13 +96,139 @@ Remove the current section from your final report.
 
 \begin{enumerate}
  \item \ReplaceMe{Just state the feature, you do not need to explain it, instead refer to the appropriate section below.}
- \item \dots
+ \item Local search operator: Or-opt
  \item \dots
 \end{enumerate}
 
 \subsection{The main loop}
 
-\ReplaceMe{Make a picture of the ``flow'' in your evolutionary algorithm, similar to the example below. Include all the main components (mutation, recombination, selection, elimination, initialization, local search operators, diversity promotion mechanisms). There are no formal requirements on how to do this, as long as it is clear and you can efficiently explain your complete evolutionary algorithm using this picture at the exam. Contrary to the picture below, include the specific techniques, e.g., top-$\lambda$ elimination, $k$-tournament selection, where possible.
+\ReplaceMe{Make a picture of the ``flow'' in your evolutionary algorithm, similar to the example below. Include all the main components (mutation, recombination, selection, elimination, initialization, local search operators, diversity promotion mechanisms). There are no formal requirements on how to do this, as long as it is clear and you can efficiently explain your complete evolutionary algorithm using this picture at the exam. Contrary to the picture below, include the specific techniques, e.g., top-$\lambda$ elimination, $k$-tournament selection, where possible.}
+
+
+\begin{tikzpicture}[
+    island/.style={draw, circle, thick, minimum size=3cm, align=center},
+    migrate/.style={->, thick},
+    every node/.style={font=\small}
+]
+
+% Islands
+\node[island] (I0) at (0,0) {
+    Island 0\\
+    \textbf{CX}: OX\\
+    \textbf{Mut}: Swap\\
+    \textbf{LS}: 2-opt
+};
+
+\node[island] (I1) at (4,0) {
+    Island 1\\
+    \textbf{CX}: PMX\\
+    \textbf{Mut}: Inversion\\
+    \textbf{LS}: Or-opt
+};
+
+\node[island] (I2) at (4,4) {
+    Island 2\\
+    \textbf{CX}: CX\\
+    \textbf{Mut}: Scramble\\
+    \textbf{LS}: 3-opt
+};
+
+\node[island] (I3) at (0,4) {
+    Island 3\\
+    \textbf{CX}: OX\\
+    \textbf{Mut}: Inversion\\
+    \textbf{LS}: None
+};
+
+% Migration arrows
+\draw[migrate] (I0) -- node[below] {best $\rightarrow$ random} (I1);
+\draw[migrate] (I1) -- node[right] {best $\rightarrow$ random} (I2);
+\draw[migrate] (I2) -- node[above] {best $\rightarrow$ random} (I3);
+\draw[migrate] (I3) -- node[left] {best $\rightarrow$ random} (I0);
+
+\end{tikzpicture}
+
+
+\begin{tikzpicture}[
+    block/.style={draw, rectangle, rounded corners, minimum width=2.8cm, minimum height=0.8cm},
+    arrow/.style={->, thick}
+]
+
+\node[block] (sel) at (0,0) {Selection};
+\node[block] (cx)  at (4,0) {Crossover};
+\node[block] (mut) at (8,0) {Mutation};
+\node[block] (ls)  at (12,0) {Local Search};
+
+\draw[arrow] (sel) -- (cx);
+\draw[arrow] (cx) -- (mut);
+\draw[arrow] (mut) -- (ls);
+
+\node at (6,-1) {\textbf{Island-specific operators}};
+\end{tikzpicture}
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[
+        island/.style={draw, circle, thick, minimum size=3cm, align=center},
+        migrate/.style={->, thick},
+        every node/.style={font=\small}
+    ]
+
+    % Islands
+    \node[island] (I0) at (0,0) {
+        Island 0\\
+        \textbf{CX}: OX\\
+        \textbf{Mut}: Swap\\
+        \textbf{LS}: 2-opt
+    };
+
+    \node[island] (I1) at (4,0) {
+        Island 1\\
+        \textbf{CX}: PMX\\
+        \textbf{Mut}: Inversion\\
+        \textbf{LS}: Or-opt
+    };
+
+    \node[island] (I2) at (4,4) {
+        Island 2\\
+        \textbf{CX}: CX\\
+        \textbf{Mut}: Scramble\\
+        \textbf{LS}: 3-opt
+    };
+
+    \node[island] (I3) at (0,4) {
+        Island 3\\
+        \textbf{CX}: OX\\
+        \textbf{Mut}: Inversion\\
+        \textbf{LS}: None
+    };
+
+    % Migration arrows
+    \draw[migrate] (I0) -- node[below] {best $\rightarrow$ random} (I1);
+    \draw[migrate] (I1) -- node[right] {best $\rightarrow$ random} (I2);
+    \draw[migrate] (I2) -- node[above] {best $\rightarrow$ random} (I3);
+    \draw[migrate] (I3) -- node[left] {best $\rightarrow$ random} (I0);
+
+    \end{tikzpicture}
+    \caption{Island-based genetic algorithm with ring migration and heterogeneous operators.}
+    \label{fig:island-ga}
+\end{figure}
+
+
+\begin{tikzpicture}[node distance=7cm]
+\node[draw, rectangle, thick] (I1) {Island 1\\OX 70\% / EPX 30\%};
+\node[draw, rectangle, thick, right of=I1] (I2) {Island 2\\OX 30\% / EPX 70\%};
+\node[draw, rectangle, thick, below of=I2] (I3) {Island 3\\Exploratory};
+\node[draw, rectangle, thick, below of=I1] (I4) {Island 4\\Balanced};
+
+\draw[->, >=stealth] (I1) -- (I2);
+\draw[->, >=stealth] (I2) -- (I3);
+\draw[->, >=stealth] (I3) -- (I4);
+\draw[->, >=stealth] (I4) -- (I1);
+
+\node at (1.5,-2.5) {Ring migration};
+\end{tikzpicture}
+
 
 \begin{center}\begin{tikzpicture}
 \draw[->,>=stealth] (0,0) -- (3.1,0);
@@ -107,33 +240,99 @@ Remove the current section from your final report.
 \node[draw,rectangle,thick,fill=white] at (8,2) {Variation};
 \node[draw,rectangle,thick,fill=white] at (8,-2) {Evaluation};
 \end{tikzpicture}\end{center}
-}
 
-\RemoveMe{\textbf{The questions from \cref{sec_rep} to \cref{sec_oth} in blue are there to guide which topics to discuss}, rather than an exact list of questions that must be answered. Feel free to add more items to discuss.}
+
+
+\begin{figure}[htbp]
+    \centering
+    \begin{tikzpicture}[node distance=2cm, every node/.style={align=center}]
+
+    % Island nodes
+    \node[circle, draw, minimum size=3cm] (I1) {Island 1 \\ \textbf{Mutation:} Inversion \\ \textbf{Crossover:} EPX};
+    \node[circle, draw, minimum size=3cm, below left=2cm of I1] (I2) {Island 2 \\ \textbf{Mutation:} Scramble \\ \textbf{Crossover:} OX};
+    \node[circle, draw, minimum size=3cm, below right=2cm of I1] (I3) {Island 3 \\ \textbf{Mutation:} Swap \\ \textbf{Crossover:} EPX};
+
+    % 3 Dots representing the hyperparameter
+    \node[draw, circle, minimum size=0.5cm, fill=black, right=3cm of I1] (dot1) {};
+    \node[draw, circle, minimum size=0.5cm, fill=black, below=0.6cm of dot1] (dot2) {};
+    \node[draw, circle, minimum size=0.5cm, fill=black, below=0.6cm of dot2] (dot3) {};
+
+    % Arrows (migration)
+    \draw[->, thick] (I1) -- node[above] {Best $\to$ Worst} (I2);
+    \draw[->, thick] (I2) -- node[below] {Best $\to$ Worst} (I3);
+    \draw[->, thick] (I3) -- node[below] {Best $\to$ Worst} (I1);
+
+    % Labeling for hyperparameter dots
+    \node[below=0.2cm of dot3] {Number of islands};
+    
+    \end{tikzpicture}
+    \caption{Island-based genetic algorithm with different mutation and crossover types, and migration scheme.}
+    \label{fig:island_ga}
+\end{figure}
+
+\RemoveMe{\textbf{The questions from \ref{sec_rep} to \ref{sec_oth} in blue are there to guide which topics to discuss}, rather than an exact list of questions that must be answered. Feel free to add more items to discuss.}
 
 \subsection{Representation}\label{sec_rep}
-
 \ReplaceMe{How do you represent the candidate solutions? What is your motivation to choose this one? What other options did you consider? How did you implement this specifically in Python (e.g., a list, set, numpy array, etc)?}
+A candidate solution is represented as a list of cities visited in order. This representation is intuitive and vectorizable if implemented as an array in \texttt{numpy}.
+We make sure that every candidate solution starts with city zero. This allows us to use \textit{Hamming Distance} as a metric for population diversity.
+Another way to represent a candidate solution would be to use a binary matrix which indicates which city is visited next. However, for large matrices this will require a lot of memory $O(N^2)$.
+
+\noindent
+In python the Representation is implemented as a numpy array. This choice is preferred due to the compability with \texttt{numba} which significantly accelerates computation time.
+
 
 \subsection{Initialization}
-
 \ReplaceMe{How do you initialize the population? How did you determine the number of individuals? Did you implement advanced initialization mechanisms (local search operators, heuristic solutions)? If so, describe them. Do you believe your approach maintains sufficient diversity? How do you ensure that your population enrichment scheme does not immediately take over the population? Did you implement other initialization schemes that did not make it to the final version? Why did you discard them? How did you determine the population size?}
 
-\subsection{Selection operators}
+\noindent
+The population in each island is inialized using a greedy heuristic on a noisy distance matrix. The greedy heuristic allows us to find initial solutions which are better than purely random solutions. Especially for large matrices this initial leap in performance is crucial since purely random initialization will not be able to converge in the allowed time.
+If the distance matrix contains unconnected cities, the greedy approach allows us to find possible tours faster.
+We preserve diversity by adding noise on the distance matrix. By varying the amount of noise on this matrix we can control the diversity of the initial population.
 
+\noindent
+BFS and DFS initialization were implemented as well with the idea of finding random initialization which are feasible when the graph is not fully connected. 
+But were left out due to the fact that for large matrices the initial bests were too high to be able to converge leading to limited benefit.
+
+\noindent
+The population size is chosen based on reasoned trial and error. A larger population promotes exploration of the search space, whereas a smaller population emphasizes exploitation of known good solutions.
+\subsection{Selection operators}
 \ReplaceMe{Which selection operators did you implement? If they are not from the slides, describe them. Can you motivate why you chose this one? Are there parameters that need to be chosen? Did you use an advanced scheme to vary these parameters throughout the iterations? Did you try other selection operators not included in the final version? Why did you discard them?}
+
+\noindent
+The implemented selection operator is k-tournaments since we have direct control on the selection pressure and it works well even when
+fitness values have a large range (like our tour lengths), as it only compares relative fitness within the tournament
+group. Small $k$ (e.g., 2-3) means a more diverse selection, weaker individuals have a better chance. Large $k$ (e.g.,
+5-10) means a more aggressive selection, strongly favoring the best individuals.
+
 
 \subsection{Mutation operators}
 
 \ReplaceMe{Which mutation operators did you implement? If they are not from the slides, describe them. How do you choose among several mutation operators? Do you believe it will introduce sufficient randomness? Can that be controlled with parameters? Do you use self-adaptivity? Do you use any other advanced parameter control mechanisms (e.g., variable across iterations)? Did you try other mutation operators not included in the final version? Why did you discard them?}
 
+\noindent
+We implemented inversion, scramble and swap mutations. 
+Inversion and scramble mutation are global mutations and the segment length is randomly picked between 0 and the number of cities.
+Swap mutation is a local mutation.
+Each island gets a different mixed probabilities of inversion, scramble and swap. 
+In this way different islands become specialist at a certain mutation. This promotes exploration. 
+The diversity between islands can be tuned by a hyperparameter which controls how much mutation mixes are different in each island.
+The base mutation rate can be tuned as well and can be adaptive.
+\textcolor{red}{Adaptive mutation}
 \subsection{Recombination operators}
 
 \ReplaceMe{Which recombination operators did you implement? If they are not from the slides, describe them. How do you choose among several recombination operators? Why did you choose these ones specifically? Explain how you believe that these operators can produce offspring that combine the best features from their parents. How does your operator behave if there is little overlap between the parents? Can your recombination be controlled with parameters; what behavior do they change? Do you use self-adaptivity? Do you use any other advanced parameter control mechanisms (e.g., variable across iterations)? Did you try other recombination operators not included in the final version? Why did you discard them? Did you consider recombination with arity strictly greater than 2?}
 
+\noindent
+We implemented three recombination operators: Ordered Crossover (OX), Edge-Preserving Crossover (EPX), and Edge Recombination Crossover (ERX). OX copies a subsequence from one parent and fills the remaining cities in the order of the second parent, preserving relative city order. EPX and ERX focus on preserving edges from both parents, with ERX building an edge map to guide offspring construction. These operators were chosen because they produce valid tours while retaining promising building blocks, such as good subsequences or edges, increasing the likelihood of high-quality offspring. When parents share few edges, edge-based operators naturally produce more exploratory offspring. Operator selection is probabilistic, and while we currently use fixed probabilities, this could be extended to self-adaptive schemes. Simpler operators like PMX or Cycle Crossover were considered but discarded due to poor edge preservation, and recombination is restricted to two parents for simplicity. To further promote diversity, each island uses a different mix of probabilities for these three operators, allowing islands to specialize in certain crossovers and explore complementary regions of the search space.
+
 \subsection{Elimination operators}
 
 \ReplaceMe{Which elimination operators did you implement? If they are not from the slides, describe them. Why did you select this one? Are there parameters that need to be chosen? Did you use an advanced scheme to vary these parameters throughout the iterations? Did you try other elimination operators not included in the final version? Why did you discard them?} 
+
+We considered $(\lambda + \mu)$ and $(\lambda, \mu)$ elimination operators.
+$(\lambda + \mu)$ inherently preserves the elites $(\lambda, \mu)$ does not.
+To promote diversity while still retaining the best solutions $(\lambda, \mu)$ with elitism was the preferred choice.
 
 \subsection{Local search operators}
 
@@ -187,7 +386,7 @@ Interpret your results. How do you rate the performance of your algorithm (time,
 
 \subsection{tour1000.csv}
 
-\ReplaceMe{Answer the same questions as in \cref{sec_shorttour}.}
+\ReplaceMe{Answer the same questions as in \ref{sec_shorttour}.}
 
 \section{Critical reflection \hfill(target: $1.5$ page)}
 

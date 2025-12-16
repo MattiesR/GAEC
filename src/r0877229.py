@@ -10,23 +10,23 @@ class r0877229:
 	population_size = 200
 
 	""" Variation params """
-	crossover_rate = 0.45
+	crossover_rate = 0.55
 	mutation_rate = 0.3
 	mutation_patience = 50
 	mutation_increase = 0.05	
-	mut_high = 0.7
+	mut_high = 0.8
 	mut_low = 0.3
 
 
 	""" Initialization params """
 	init_random_ratio = 0.0
 	init_greedy_ratio = 1.0
-	noise_init_greedy = 0.04	
+	noise_init_greedy = 0.01	
 	init_bfs_ratio = 0.0
 	init_dfs_ratio = 0.0
 	init_vectorized_random_ratio = 0.0
 	""" Selection params """
-	k_tournament = 2
+	k_tournament = 3
 	elitism_ratio = 0.05	# Default as 5%
 	
 	""" Variation params """
@@ -37,16 +37,16 @@ class r0877229:
 	scramble_ratio = 0.10 	# Occasional low probability
 
 	""" Local search params """
-	local_search_probability = 0.45
+	local_search_probability = 0.35
 	lso_max = 0.45      # start aggressive
 	lso_min = 0.25    # keep a little LS forever
 
-	max_improv_two_opt = 40
-	max_improv_three_opt = 10
-	max_improv_seg_swap = 40
+	max_improv_two_opt = 20
+	max_improv_three_opt = 5
+	max_improv_seg_swap = 20
     
 
-	min_seg = 2
+	min_seg = 3
 	max_seg = 15
       
 
@@ -57,8 +57,8 @@ class r0877229:
 
 	""" Fitness sharing """
 	fitness_sharing_treshold = 0.35
-	sigma = 0.3
-	alpha = 1.0
+	sigma = 0.6
+	alpha = 1.2
 	# -------------------
 	# Objective function
 	# -------------------
@@ -70,12 +70,12 @@ class r0877229:
 		# Global-only hyperparameters (instance attributes) 
 		""" Stopping criterea params"""
 		self.max_iterations = 1e9
-		self.patience = 3e2
+		self.patience = 3e9
 
 
 		""" Diversity promotion """
 		self.num_islands = 6				 # 8
-		self.migration_interval = 150	 # 100
+		self.migration_interval = 200	 # 100
 
 		""" Diversity per Island """
 		self.island_diversity_init = 0.2  # Diversity in the initialization of islands
@@ -110,7 +110,9 @@ class r0877229:
 		no_improvement = 0
 
 		while iteration < self.max_iterations:
-
+			""" REMOVE BEFORE HANDING IN: """
+			if distance_matrix.shape[0] == 15:
+				self.max_iterations = 100
 			# --- Genetic operations per island ---
 			# --- For each island ---
 			for island in islands:
@@ -141,6 +143,8 @@ class r0877229:
 			best_per_island = [isl.best() for isl in islands]
 			populations = [isl.population for isl in islands]
 			hamming_divs_per_island = all_islands_diversity_numba(populations)
+			for (i,hamming_div) in enumerate(hamming_divs_per_island):
+				islands[i].update_effective_crossover_rate(hamming_div)
 
 			# --- Global best ---
 			all_fitness = np.concatenate([isl.fitness for isl in islands])
@@ -166,7 +170,10 @@ class r0877229:
 				print("Out of patience")
 				print("Nuclear bomb comming soon")
 				break
-
+			if abs((best_objective - mean_objective)) <= 1e-5 and iteration > 100:
+				print("Mean converged to best!")
+				break
+                  
 			if best_objective < self.best_objective:
 				no_improvement = 0
 				self.mutation_rate = self.mut_low
@@ -179,11 +186,11 @@ class r0877229:
 			self.mean_objective = mean_objective
 
 			# Adaptively decrease local search 
-			# self.local_search_probability = max(self.lso_min,self.lso_max * (time_left / 300.0))	
-			p = max(0.0, min(1.0, time_left / 300.0))
-			self.local_search_probability = max(self.lso_min, self.lso_max * p * p)
-			for island in islands:
-				island.local_search_probability = self.local_search_probability
+			# # self.local_search_probability = max(self.lso_min,self.lso_max * (time_left / 300.0))	
+			# p = max(0.0, min(1.0, time_left / 300.0))
+			# self.local_search_probability = max(self.lso_min, self.lso_max * p * p)
+			# for island in islands:
+			# 	island.local_search_probability = self.local_search_probability
 
 			print(f"Iteration: {iteration}, best = {best_objective}, mean= {mean_objective}")
 		return 0
@@ -256,7 +263,7 @@ class r0877229:
 		
 		# Directly call the Numba greedy initializer
 		population = init_greedy_numba(distance_matrix, pop_size, noise_scale=self.noise_init_greedy)
-		population = local_search_population_2opt(population, distance_matrix, 100)
+		# population = local_search_population_2opt(population, distance_matrix, 10) # 1000 gives worse results hmmm weird
 		return population
 
 	# Random
@@ -376,6 +383,63 @@ class r0877229:
 
 	""" next generation """
 	def next_generation(self, population, fitness, distance_matrix):
+		"""
+		(λ, µ) + elitism GA generation step.
+		Parents cannot survive except for explicit elites.
+		"""
+		num_individuals = len(population)
+		new_pop = np.zeros_like(population)
+
+		# === 1) Diversity check ===
+		global_hamming_diversity = global_hamming_diversity_numba(population)
+		use_sharing = global_hamming_diversity < self.fitness_sharing_treshold
+		# use_sharing = True
+		if use_sharing:
+			selection_fitness = fitness_sharing_numba(population, fitness, sigma=self.sigma, alpha=self.alpha)
+		else:
+			selection_fitness = fitness
+
+		# === 2) ELITISM ===
+		elitism = max(1,int(self.population_size * self.elitism_ratio))
+		# Copy top elites directly from parents
+		new_pop[:elitism] = elitism_core_numba(population, fitness, elitism)
+
+		# Apply local search on elites
+		for i in range(elitism):
+			if np.random.rand() < self.local_search_probability:
+				new_pop[i] = self.apply_local_search(new_pop[i], distance_matrix, global_hamming_diversity)
+
+		# === 3) Offspring creation ===
+		for i in range(elitism, num_individuals):
+			parent1, parent2 = tournament_selection_numba(
+				population, selection_fitness, self.k_tournament, 2
+			)
+			child = self.crossover(parent1, parent2)
+			child = self.mutate(child)
+
+			# Adaptive local search
+			child = self.apply_local_search(child, distance_matrix, global_hamming_diversity)
+			new_pop[i] = child
+
+		# === 4) Evaluation ===
+		new_fitness = evaluate_population_numba(new_pop, distance_matrix)
+
+		# === 5) Normalization (optional) ===
+		normalize_population_numba(new_pop)
+
+		# === 6) Elimination (λ, µ) style ===
+		# Only consider offspring (excluding elites) for survival
+		# Elites are already in place
+		offspring = new_pop[elitism:]
+		offspring_fitness = new_fitness[elitism:]
+		
+		# Select top (num_individuals - elitism) offspring
+		top_idx = np.argsort(offspring_fitness)[:num_individuals - elitism]
+		new_pop[elitism:] = offspring[top_idx]
+		new_fitness[elitism:] = offspring_fitness[top_idx]
+		return new_pop, new_fitness
+      
+	def next_generation_old(self, population, fitness, distance_matrix):
 		num_individuals = len(population)
 		new_pop = np.zeros_like(population)
 
@@ -404,31 +468,16 @@ class r0877229:
 			
 		# === 2-4) Offspring creation loop ===
 		for i in range(elitism, num_individuals):
-			# 2) Selection (Numba)
 			parent1, parent2 = tournament_selection_numba(
 				population, selection_fitness, self.k_tournament, 2
 			)
-
-			# Variation
-			child = self.crossover(parent1,parent2)
+			child = self.crossover(parent1, parent2)
 			child = self.mutate(child)
-			
-			# 5) Local Search Operator (Python wrapper → Numba 2-opt)
-			if np.random.rand() < self.local_search_probability:
-				U = np.random.rand()
-				if U < 0.75:
-					child = two_opt_fast(child, distance_matrix, self.max_improv_two_opt)
-				elif 0.75 < U <0.95:
-					N = distance_matrix.shape[0]
-					segment_length = np.random.randint(self.min_seg, min(self.max_seg,N))
-					child = segment_swap_delta_safe(child, distance_matrix, max_improvement=self.max_improv_seg_swap, segment_length=segment_length)
-				else:
-					child = three_opt_fast(child, distance_matrix, self.max_improv_three_opt)
 
-				# child = three_opt_fast(child, distance_matrix, self.max_improvement_lso)
-
-			
+			# Apply adaptive local search
+			child = self.apply_local_search(child, distance_matrix, global_hamming_diversity)
 			new_pop[i] = child
+
                   
 
 		# === 5) Evaluation phase (Numba, via Python wrapper) ===
@@ -475,15 +524,25 @@ class r0877229:
 
 	""" Variation steps """
 	def crossover(self, parent1, parent2):
-		if np.random.rand() < self.crossover_rate:
+		if np.random.rand() < self.crossover_rate_eff:
 			if np.random.rand() < 0.15:
 				return ordered_crossover(parent1, parent2)
 			else:
 				return epx_crossover(parent1, parent2)
-			# return self.edge_recombination(parent1, parent2)
 			# return erx_fast(parent1,parent2)
 		return parent1.copy()
-		
+	def update_effective_crossover_rate(self, diversity):
+		"""
+		diversity ∈ [0,1]
+		high diversity  -> high crossover
+		low diversity   -> reduced crossover
+		"""
+
+		self.crossover_rate_eff = max(
+			self.crossover_rate * diversity**0.25,
+			0.1
+		)
+	
 	def edge_recombination(self,parent1, parent2):
 		"""
 		Edge Recombination Crossover (ERX).
@@ -577,6 +636,57 @@ class r0877229:
 			self.inversion_ratio = 0.0
 			self.scramble_ratio = 1.0
 		assert self.swap_ratio + self.inversion_ratio + self.scramble_ratio == 1.0
+            
+	def apply_local_search(self, individual, distance_matrix, global_hamming_diversity):
+		"""
+		High diversity → more local search, mostly light (2-opt)
+		Low diversity → less LS, but stronger if applied
+		"""
+
+		# # --- LS probability: increases with diversity
+		# ls_prob = max(
+		# 	self.local_search_probability * global_hamming_diversity,
+		# 	0.15
+		# )
+		# if np.random.rand() >= ls_prob:
+		# 	return individual
+		if np.random.rand() >= self.local_search_probability:
+			return individual
+
+		# # --- LS type probabilities
+		# # High diversity → 2-opt dominates
+		# two_opt_prob   = 0.6 + 0.3 * global_hamming_diversity
+		# seg_swap_prob  = 0.25
+		# three_opt_prob = 1.0 - two_opt_prob - seg_swap_prob
+
+		# probs = np.array([two_opt_prob, seg_swap_prob, three_opt_prob])
+		# probs = np.clip(probs, 0.05, 1.0)
+		# probs /= probs.sum()
+
+		# choice = np.random.choice([0, 1, 2], p=probs)
+
+		# if choice == 0:
+		# 	return two_opt_fast(
+		# 		individual, distance_matrix, self.max_improv_two_opt
+		# 	)
+
+		# elif choice == 1:
+		# 	N = distance_matrix.shape[0]
+		# 	segment_length = np.random.randint(
+		# 		self.min_seg, min(self.max_seg, N)
+		# 	)
+		# 	return segment_swap_delta_safe(
+		# 		individual, distance_matrix,
+		# 		max_improvement=self.max_improv_seg_swap,
+		# 		segment_length=segment_length
+		# 	)
+
+		# else:
+		# 	return three_opt_fast(
+		# 		individual, distance_matrix, self.max_improv_three_opt
+		# 	)
+		else:
+			return or_opt_fast(individual, distance_matrix, 5, 3)
 
 
 	def migrate(self, islands, distance_matrix, migrants_per_island=1):
@@ -653,6 +763,7 @@ class Island(r0877229):
 		self.indiv_rules = None
 		self.no_improvement = 0
 		self.best_objective = np.inf
+		self.crossover_rate_eff = self.crossover_rate
 
 	def initialize(self, distance_matrix):
 		self.population = self.initialize_population(self.population_size, distance_matrix)
@@ -994,6 +1105,133 @@ def three_opt_fast(route, distance_matrix, max_improve=5):
 
     return route
 
+
+
+@njit(cache=True)
+def or_opt_fast(route, distance_matrix, max_improve=5, max_seg_len=3):
+    N = len(route)
+    tmp = np.empty(N, dtype=route.dtype)
+
+    improve_count = 0
+    improved = True
+
+    while improved and improve_count < max_improve:
+        improved = False
+
+        for seg_len in range(1, max_seg_len + 1):
+            for i in range(1, N - seg_len):
+                a = route[i - 1]
+                b = route[i]
+                c = route[i + seg_len - 1]
+                d = route[i + seg_len]
+
+                removed = (
+                    distance_matrix[a, b]
+                    + distance_matrix[c, d]
+                )
+
+                for k in range(N - 1):
+
+                    # illegal insertion positions
+                    if k >= i - 1 and k < i + seg_len:
+                        continue
+
+                    e = route[k]
+                    f = route[k + 1]
+
+                    old = removed + distance_matrix[e, f]
+                    new = (
+                        distance_matrix[a, d]
+                        + distance_matrix[e, b]
+                        + distance_matrix[c, f]
+                    )
+
+                    if new < old:
+                        pos = 0
+
+                        if k < i - 1:
+                            # ---- insert BEFORE segment ----
+                            # prefix [0 .. k]
+                            for t in range(0, k + 1):
+                                tmp[pos] = route[t]
+                                pos += 1
+
+                            # segment
+                            for t in range(seg_len):
+                                tmp[pos] = route[i + t]
+                                pos += 1
+
+                            # middle
+                            for t in range(k + 1, i):
+                                tmp[pos] = route[t]
+                                pos += 1
+
+                            # suffix
+                            for t in range(i + seg_len, N):
+                                tmp[pos] = route[t]
+                                pos += 1
+
+                        else:
+                            # ---- insert AFTER segment ----
+                            # prefix
+                            for t in range(0, i):
+                                tmp[pos] = route[t]
+                                pos += 1
+
+                            # middle
+                            for t in range(i + seg_len, k + 1):
+                                tmp[pos] = route[t]
+                                pos += 1
+
+                            # segment
+                            for t in range(seg_len):
+                                tmp[pos] = route[i + t]
+                                pos += 1
+
+                            # suffix
+                            for t in range(k + 1, N):
+                                tmp[pos] = route[t]
+                                pos += 1
+
+                        # HARD SAFETY CHECK (can remove later)
+                        if pos != N:
+                            raise RuntimeError("Or-opt write count mismatch")
+
+                        for t in range(N):
+                            route[t] = tmp[t]
+
+                        improved = True
+                        improve_count += 1
+                        break
+
+                if improved:
+                    break
+            if improved:
+                break
+
+    return route
+
+
+
+
+@njit(cache=True, parallel=True)
+def local_search_population_oropt(
+    population,
+    distance_matrix,
+    max_improve,
+    max_seg_len
+):
+    pop_size = population.shape[0]
+
+    for i in prange(pop_size):
+        population[i] = or_opt_fast(
+            population[i],
+            distance_matrix,
+            max_improve,
+            max_seg_len
+        )
+
+    return population
 
 @njit(cache=True)
 def build_adj_list(parent1, parent2):

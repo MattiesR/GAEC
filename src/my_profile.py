@@ -48,7 +48,7 @@ solver = r0877229.r0877229(filename = f"geac_tour_{warmup_size}")
 solver.optimize(f"src/data/tour{warmup_size}.csv")
 print("WE WARMED UP")
 # Now start profiling
-
+check_tour_validity(f"geac_tour_{warmup_size}.csv", warmup_size)
 
 
 size = 500
@@ -67,4 +67,4 @@ stats.sort_stats("cumtime")     # or "tottime"
 stats.print_stats("r0877229.py")  # only show functions from your file
 check_tour_validity(f"geac_tour_{size}.csv", size)
 
-# plots.plot_convergence(f"geac_tour_{size}")
+plots.plot_convergence(f"geac_tour_{size}")
