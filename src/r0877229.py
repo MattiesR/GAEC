@@ -11,11 +11,11 @@ class r0877229:
 
 	""" Variation params """
 	crossover_rate = 0.55
-	mutation_rate = 0.3
+	mutation_rate = 0.1
 	mutation_patience = 50
 	mutation_increase = 0.05	
-	mut_high = 0.8
-	mut_low = 0.3
+	mut_high = 0.3
+	mut_low = 0.1
 
 
 	""" Initialization params """
@@ -26,7 +26,7 @@ class r0877229:
 	init_dfs_ratio = 0.0
 	init_vectorized_random_ratio = 0.0
 	""" Selection params """
-	k_tournament = 3
+	k_tournament = 3 
 	elitism_ratio = 0.05	# Default as 5%
 	
 	""" Variation params """
@@ -37,7 +37,7 @@ class r0877229:
 	scramble_ratio = 0.10 	# Occasional low probability
 
 	""" Local search params """
-	local_search_probability = 0.35
+	local_search_probability = 0.15
 	lso_max = 0.45      # start aggressive
 	lso_min = 0.25    # keep a little LS forever
 
@@ -685,8 +685,12 @@ class r0877229:
 		# 	return three_opt_fast(
 		# 		individual, distance_matrix, self.max_improv_three_opt
 		# 	)
+            
 		else:
-			return or_opt_fast(individual, distance_matrix, 5, 3)
+			if np.random.uniform() < 0.10:
+				return three_opt_fast(individual, distance_matrix,self.max_improv_two_opt)
+			else:
+				return or_opt_fast(individual, distance_matrix, 10, 4)
 
 
 	def migrate(self, islands, distance_matrix, migrants_per_island=1):

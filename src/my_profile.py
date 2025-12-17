@@ -51,7 +51,7 @@ print("WE WARMED UP")
 check_tour_validity(f"geac_tour_{warmup_size}.csv", warmup_size)
 
 
-size = 500
+size = 600
 filename = f"src/data/tour{size}.csv"
 
 solver = r0877229.r0877229(filename = f"geac_tour_{size}")

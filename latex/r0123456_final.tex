@@ -330,25 +330,35 @@ We implemented three recombination operators: Ordered Crossover (OX), Edge-Prese
 
 \ReplaceMe{Which elimination operators did you implement? If they are not from the slides, describe them. Why did you select this one? Are there parameters that need to be chosen? Did you use an advanced scheme to vary these parameters throughout the iterations? Did you try other elimination operators not included in the final version? Why did you discard them?} 
 
-We considered $(\lambda + \mu)$ and $(\lambda, \mu)$ elimination operators.
-$(\lambda + \mu)$ inherently preserves the elites $(\lambda, \mu)$ does not.
-To promote diversity while still retaining the best solutions $(\lambda, \mu)$ with elitism was the preferred choice.
+\noindent
+We implemented $(\lambda, \mu)$ elimination with elitism for our genetic algorithm. Initially, we tested the $(\lambda + \mu)$ scheme, which preserves all elites automatically. However, we observed that this approach led to rapid loss of population diversity, as the best individuals dominated too quickly. To maintain exploration while still retaining the top solutions, we switched to $(\lambda, \mu)$ elimination combined with elitism, which explicitly preserves a small number of the best individuals each generation. This approach allows the majority of the population to be replaced, promoting diversity, while ensuring that the best solutions are never lost. No advanced parameter control (e.g., self-adaptivity) was applied to the elitism fraction.
 
 \subsection{Local search operators}
 
 \ReplaceMe{What local search operators did you implement? Describe them. Did they cause a significant improvement in the performance of your algorithm? Why (not)? Did you consider other local search operators that did not make the cut? Why did you discard them? Are there parameters that need to be determined in your operator? Do you use an advanced scheme to determine them (e.g., adaptive or self-adaptive)?}
 
+We implemented symmetric 2-opt and 3-opt, these method make use of a local delta computation to check which local permutations are better. When the matrix is asymmetric the operator could lead to wrong improvements. Using the delta calculation improves the cost significantly. Or-opt is implemented as well, this method evaluates a subset of 3-opt, it swaps segments without reversing so it is valid for asymmetric matrices. 
+Segment-swaps is considered as well to increase the diversity.
+We use selfadaptivity.
+
 \subsection{Diversity promotion mechanisms}
 
 \ReplaceMe{Did you implement a diversity promotion scheme? If yes, which one? If no, why not? Describe the mechanism you implemented. In what sense does the mechanism improve the performance of your evolutionary algorithm? Are there parameters that need to be determined? Did you use an advanced scheme to determine them?}
 
+Island model and fitness sharing.
+Island model with the idea of exploring multiple minima. And fitness sharing to preserve diversity within an island. Fitness sharing is adaptively triggered whenever the hamming distance becomes too low.
 \subsection{Stopping criterion}
 
 \ReplaceMe{Which stopping criterion did you implement? Did you combine several criteria?}
 
+We decided that we a stopping criterion won't be the best choice, instead we want to use all five available minutes. Instead we decide a triggering criterion to trigger a nuclear bomb which wipes out the entire population and initializes the population again. This way we run the algorithm again and hope for convergence to a better minimum.
 \subsection{Parameter selection}
 
 \ReplaceMe{For all of the parameters that are not automatically determined by adaptivity or self-adaptivity (as you have described above), describe how you determined them. Did you perform a hyperparameter search? How did you do this? How did you determine these parameters would be valid both for small and large problem instances?}
+
+We did do a hyperparameter search with the help of an optimizer tool \texttt{optuna}. Optuna builds an internal model of good hyperparameter combinations.
+By optimizing the parameters for the different tours we arrive at good hyperparam combinations. Results of optuna are tested and further manually tuned to get idea of what's happening.
+
 
 \subsection{Other considerations}\label{sec_oth}
 
