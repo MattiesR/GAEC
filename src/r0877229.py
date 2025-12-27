@@ -3,863 +3,566 @@ import numpy as np
 from numba import njit, prange
 
 class r0877229:
-	# -------------------
-	# Hyperparameters
-	# -------------------
-	""" Population params """
-	population_size = 200
+    # -------------------
+    # Hyperparameters
+    # -------------------
+    """ Population params """
+    population_size = 270
 
-	""" Variation params """
-	crossover_rate = 0.55
-	mutation_rate = 0.1
-	mutation_patience = 50
-	mutation_increase = 0.05	
-	mut_high = 0.3
-	mut_low = 0.1
+    """ Initialization params """
+    init_noise_scale = 0.01
+      
+    """ Selection params """
+    k_tournament = 2
+
+    """ Mutation params """
+    mut_base = 0.1
+    mut_high = 0.2
+    mutation_patience = 263
+    swap_ratio = 0.55
+    inversion_ratio = 0.35	
+    scramble_ratio = 0.10 	# Occasional low probability
+
+    """ Crossover params """
+    crossover_min = 0.45
+    crossover_max = 0.65
+    ox_ratio = 0.15
+    epx_ratio = 0.65
+    erx_ratio = 0.20
+      
+    """ Elimination params """
+    elitism_ratio = 0.04
+      
+    """ Local search params """
+    lso_max = 0.25      # start aggressive
+    lso_min = 0.05    # keep a little LS forever
+
+    max_improv_two_opt = 20
+    max_improv_three_opt = 2
+    max_improv_or_opt = 12
+    
+    two_opt_ratio = 0.50
+    three_opt_ratio = 0.05
+    or_opt_ratio = 0.45
+    max_seg_length_or_opt = 3
 
 
-	""" Initialization params """
-	init_random_ratio = 0.0
-	init_greedy_ratio = 1.0
-	noise_init_greedy = 0.01	
-	init_bfs_ratio = 0.0
-	init_dfs_ratio = 0.0
-	init_vectorized_random_ratio = 0.0
-	""" Selection params """
-	k_tournament = 3 
-	elitism_ratio = 0.05	# Default as 5%
-	
-	""" Variation params """
-	
-	# Ratios Mutations (weights of mutation schemes)
-	swap_ratio = 0.55
-	inversion_ratio = 0.35	
-	scramble_ratio = 0.10 	# Occasional low probability
+    """ Island diversity"""
+    crossover_diversity = 0.289 
+    crossover_specialization = 4
 
-	""" Local search params """
-	local_search_probability = 0.15
-	lso_max = 0.45      # start aggressive
-	lso_min = 0.25    # keep a little LS forever
+    """ Fitness sharing """
+    fitness_sharing_treshold = 0.1258
+    sigma = 0.815
+    alpha = 2.69
+    # -------------------
+    # Objective function
+    # -------------------
+    best_objective = np.inf
+    mean_objective = np.inf
 
-	max_improv_two_opt = 20
-	max_improv_three_opt = 5
-	max_improv_seg_swap = 20
+    global_best_objective = np.inf
+    global_mean_objective = np.inf
+    global_best_solution = np.ndarray
     
 
-	min_seg = 3
-	max_seg = 15
+    def __init__(self, filename=None):
+        self.mutation_rate = self.mut_base
+        # Global-only hyperparameters (instance attributes) 
+        """ Stopping criterea params"""
+        self.max_iterations = 1e8
+        self.patience = 5e2
+
+        """ Diversity promotion """
+        self.num_islands = 8				 # 8
+        self.migration_interval = 300	 # 100
+
+
+        if filename is None:
+            filename = self.__class__.__name__
+        self.reporter = Reporter.Reporter(filename)
+
+    
+    # -------------------
+    # Main optimization loop
+    # -------------------
+    def optimize(self, filename):
+        distance_matrix = np.genfromtxt(
+            filename,
+            delimiter=",",
+            missing_values="Inf",
+            filling_values=np.inf
+        )
+
+        # Initialize islands
+        islands_size = self.population_size // self.num_islands
+        islands = [Island(islands_size,i) for i in range(self.num_islands)]
+
+        """ Apply island crossover diversity and specialization """
+        self.apply_island_crossover_diversity(islands, self.crossover_diversity)
+        self.apply_specialization(islands, self.crossover_specialization)
+        """ Initialize islands and specialize islands """
+        for i, island in enumerate(islands):
+            island.initialize(distance_matrix)
+
+        self.print_islands_rules(islands)
+
+        iteration = 0
+        no_improvement = 0
+
+        while iteration < self.max_iterations:
+            """ REMOVE BEFORE HANDING IN: """
+            if distance_matrix.shape[0] == 15:
+                self.max_iterations = 100
+            # --- Genetic operations per island ---
+            # --- For each island ---
+            for island in islands:
+                # Generate next generation
+                island.next_generation(distance_matrix)
+                
+                # Find best individual in this island
+                best_idx = np.argmin(island.fitness)
+                best_obj = island.fitness[best_idx]
+                
+                # --- Update per-island no_improvement ---
+                if best_obj < island.best_objective:
+                    # Improvement found → reset counter
+                    island.best_objective = best_obj
+                    island.no_improvement = 0
+                else:
+                    # No improvement → increment counter
+                    island.no_improvement += 1
+                
+                # Adaptive mutation can use the updated counter
+                island.adaptive_mutation()
+
+            # --- Migration ---
+            if iteration % self.migration_interval == 0:
+                self.migrate(islands, distance_matrix)
+
+            # --- Best per island ---
+            best_per_island = [isl.best() for isl in islands]
+            populations = [isl.population for isl in islands]
+            hamming_divs_per_island = all_islands_diversity_numba(populations)
+            for (i,hamming_div) in enumerate(hamming_divs_per_island):
+                islands[i].update_effective_crossover_rate(hamming_div)
+
+            # --- Global best ---
+            all_fitness = np.concatenate([isl.fitness for isl in islands])
+            all_population = np.concatenate([isl.population for isl in islands])
+            best_idx = np.argmin(all_fitness)
+            best_solution = all_population[best_idx]
+            best_objective = all_fitness[best_idx]
+            mean_objective = np.mean(all_fitness)
+
+            # --- Global best of current generation ---
+            all_fitness = np.concatenate([isl.fitness for isl in islands])
+            all_population = np.concatenate([isl.population for isl in islands])
+
+            best_idx = np.argmin(all_fitness)
+            best_solution = all_population[best_idx]
+            best_objective = all_fitness[best_idx]
+
+            # --- Update global best across all iterations ---
+            if best_objective < self.global_best_objective:
+                self.global_best_objective = best_objective
+                self.global_best_solution = best_solution.copy()
+                no_improvement = 0  # reset no improvement counter
+
+            self.global_mean_objective = mean_objective
+            # --- Reporting ---
+            time_left = self.reporter.report(self.global_mean_objective, self.global_best_objective, self.global_best_solution)
+            print("Best per island:")
+            for idx, ((_, obj), hamming) in enumerate(zip(best_per_island, hamming_divs_per_island)):
+                print(f"  Island {idx}: best objective = {obj:.4f}, hamming = {hamming:.4f}")
+
+            # Stopping criteria
+            if time_left < 0:
+                print("Ran out of time")
+                break
+
+            if no_improvement >= self.patience:
+                print("Out of patience")
+                print("Nuclear bomb comming soon")
+                break
+            if abs((best_objective - mean_objective)) <= 1e-5 and iteration > 100:
+                print("Mean converged to best!")
+                break
+                  
+
+            iteration += 1
+            no_improvement += 1
+
+            # Updating best objectives
+            self.best_objective = best_objective
+            self.mean_objective = mean_objective
+
+            # Adaptively decrease local search 
+            # # self.local_search_probability = max(self.lso_min,self.lso_max * (time_left / 300.0))	
+            # p = max(0.0, min(1.0, time_left / 300.0))
+            # self.local_search_probability = max(self.lso_min, self.lso_max * p * p)
+            # for island in islands:
+            # 	island.local_search_probability = self.local_search_probability
+
+            print(f"Iteration: {iteration}, best = {self.global_best_objective}, mean= {self.global_mean_objective}")
+        return 0
+
+
+    def apply_island_crossover_diversity(self, islands, diversity):
+        """
+        Spread crossover ratios across islands according to self.crossover_diversity.
+        Islands: list of island objects with attributes ox_ratio, epx_ratio, erx_ratio
+        self.crossover_diversity: float in [0,1]
+        self.ox_ratio, self.epx_ratio, self.erx_ratio: base ratios
+        """
+        base = np.array([self.erx_ratio, self.epx_ratio, self.ox_ratio], dtype=float) 
+        num_ops = len(base)
+        num_islands = len(islands)
+
+        for i, isl in enumerate(islands):
+            # Pick dominant operator (cycle through erx, epx, ox)
+            dominant = i % num_ops
+            e = np.zeros(num_ops)
+            e[dominant] = 1.0
+
+            # Interpolate between base and dominant vector according to diversity
+            p = (1 - diversity) * base + diversity * e
+
+            # Assign back to island attributes in correct order (erx, epx, ox)
+            isl.erx_ratio, isl.epx_ratio, isl.ox_ratio = p
+
+    def apply_specialization(self, islands, alpha):
+        for isl in islands:
+            isl.specialize(alpha)
+    
+    def initialize_population(self, pop_size, distance_matrix):
+        """
+        Initialize the population using greedy initialization for all individuals,
+        optionally adding noise to diversify solutions.
+        """
+        print("------------------------------")
+        print(f"Initialized population of {pop_size} individuals using Greedy + noise.")
+        print("------------------------------")
+        
+        # Directly call the Numba greedy initializer
+        population = init_greedy_numba(distance_matrix, pop_size, noise_scale=self.init_noise_scale)
+        # population = local_search_population_2opt(population, distance_matrix, 10) # 1000 gives worse results hmmm weird
+        return population
+
+
+    """ Evalulation of the population """
+    def evaluate_population(self, population, distance_matrix):
+        return evaluate_population_numba(population, distance_matrix)
+
+    """ next generation """
+    def next_generation(self, population, fitness, distance_matrix):
+        """
+        (λ, µ) + elitism GA generation step.
+        Parents cannot survive except for explicit elites.
+        """
+        num_individuals = len(population)
+        new_pop = np.zeros_like(population)
+
+        # === 1) Diversity check ===
+        global_hamming_diversity = global_hamming_diversity_numba(population)
+        use_sharing = global_hamming_diversity < self.fitness_sharing_treshold
+        # use_sharing = True
+        if use_sharing:
+            selection_fitness = fitness_sharing_numba(population, fitness, sigma=self.sigma, alpha=self.alpha)
+        else:
+            selection_fitness = fitness
+
+        # === 2) ELITISM ===
+        elitism = max(1,int(self.population_size * self.elitism_ratio))
+        # Copy top elites directly from parents
+        new_pop[:elitism] = elitism_core_numba(population, fitness, elitism)
+
+        # # Apply local search on elites with static lso probability
+        # for i in range(elitism):
+        #     new_pop[i] = self.apply_local_search(new_pop[i], distance_matrix, global_hamming_diversity)
+
+        # === 3) Offspring creation ===
+        for i in range(elitism, num_individuals):
+            parent1, parent2 = tournament_selection_numba(
+                population, selection_fitness, self.k_tournament, 2
+            )
+            child = self.crossover(parent1, parent2)
+            child = self.mutate(child)
+
+            # Adaptive local search
+            child = self.apply_local_search(child, distance_matrix, global_hamming_diversity)
+            new_pop[i] = child
+
+        # === 4) Evaluation ===
+        new_fitness = evaluate_population_numba(new_pop, distance_matrix)
+
+        # === 5) Normalization (optional) ===
+        normalize_population_numba(new_pop)
+
+        # === 6) Elimination (λ, µ) style ===
+        # Only consider offspring (excluding elites) for survival
+        # Elites are already in place
+        offspring = new_pop[elitism:]
+        offspring_fitness = new_fitness[elitism:]
+        
+        # Select top (num_individuals - elitism) offspring
+        top_idx = np.argsort(offspring_fitness)[:num_individuals - elitism]
+        new_pop[elitism:] = offspring[top_idx]
+        new_fitness[elitism:] = offspring_fitness[top_idx]
+        return new_pop, new_fitness
       
 
-	""" Island diversity"""
-	island_diversity_init = 0.2
-	island_diversity_rules = 0.3
-	
-
-	""" Fitness sharing """
-	fitness_sharing_treshold = 0.35
-	sigma = 0.6
-	alpha = 1.2
-	# -------------------
-	# Objective function
-	# -------------------
-	best_objective = np.inf
-	mean_objective = np.inf
-	
-
-	def __init__(self, filename=None):
-		# Global-only hyperparameters (instance attributes) 
-		""" Stopping criterea params"""
-		self.max_iterations = 1e9
-		self.patience = 3e9
-
-
-		""" Diversity promotion """
-		self.num_islands = 6				 # 8
-		self.migration_interval = 200	 # 100
-
-		""" Diversity per Island """
-		self.island_diversity_init = 0.2  # Diversity in the initialization of islands
-		self.island_diversity_rules = 0.2 # Different rules at different islands
-
-		if filename is None:
-			filename = self.__class__.__name__
-		self.reporter = Reporter.Reporter(filename)
-
-	
-	# -------------------
-	# Main optimization loop
-	# -------------------
-	def optimize(self, filename):
-		distance_matrix = np.genfromtxt(
-			filename,
-			delimiter=",",
-			missing_values="Inf",
-			filling_values=np.inf
-		)
-
-		# Initialize islands
-		islands_size = self.population_size // self.num_islands
-		islands = [Island(islands_size,i) for i in range(self.num_islands)]
-	
-		for i, island in enumerate(islands):
-			island.initialize(distance_matrix)
-			island.apply_island_diversity(i, islands_size, self.island_diversity_rules)
-		self.print_islands_rules(islands)
-
-		iteration = 0
-		no_improvement = 0
-
-		while iteration < self.max_iterations:
-			""" REMOVE BEFORE HANDING IN: """
-			if distance_matrix.shape[0] == 15:
-				self.max_iterations = 100
-			# --- Genetic operations per island ---
-			# --- For each island ---
-			for island in islands:
-				# Generate next generation
-				island.next_generation(distance_matrix)
-				
-				# Find best individual in this island
-				best_idx = np.argmin(island.fitness)
-				best_obj = island.fitness[best_idx]
-				
-				# --- Update per-island no_improvement ---
-				if best_obj < island.best_objective:
-					# Improvement found → reset counter
-					island.best_objective = best_obj
-					island.no_improvement = 0
-				else:
-					# No improvement → increment counter
-					island.no_improvement += 1
-				
-				# Adaptive mutation can use the updated counter
-				island.adaptive_mutation()
-
-			# --- Migration ---
-			if iteration % self.migration_interval == 0:
-				self.migrate(islands, distance_matrix)
-
-			# --- Best per island ---
-			best_per_island = [isl.best() for isl in islands]
-			populations = [isl.population for isl in islands]
-			hamming_divs_per_island = all_islands_diversity_numba(populations)
-			for (i,hamming_div) in enumerate(hamming_divs_per_island):
-				islands[i].update_effective_crossover_rate(hamming_div)
-
-			# --- Global best ---
-			all_fitness = np.concatenate([isl.fitness for isl in islands])
-			all_population = np.concatenate([isl.population for isl in islands])
-			best_idx = np.argmin(all_fitness)
-			best_solution = all_population[best_idx]
-			best_objective = all_fitness[best_idx]
-			mean_objective = np.mean(all_fitness)
-
-
-			# --- Reporting ---
-			time_left = self.reporter.report(mean_objective, best_objective, best_solution)
-			print("Best per island:")
-			for idx, ((_, obj), hamming) in enumerate(zip(best_per_island, hamming_divs_per_island)):
-				print(f"  Island {idx}: best objective = {obj:.4f}, hamming = {hamming:.4f}")
-
-			# Stopping criteria
-			if time_left < 0:
-				print("Ran out of time")
-				break
-
-			if no_improvement >= self.patience:
-				print("Out of patience")
-				print("Nuclear bomb comming soon")
-				break
-			if abs((best_objective - mean_objective)) <= 1e-5 and iteration > 100:
-				print("Mean converged to best!")
-				break
-                  
-			if best_objective < self.best_objective:
-				no_improvement = 0
-				self.mutation_rate = self.mut_low
-
-			iteration += 1
-			no_improvement += 1
-
-			# Updating best objectives
-			self.best_objective = best_objective
-			self.mean_objective = mean_objective
-
-			# Adaptively decrease local search 
-			# # self.local_search_probability = max(self.lso_min,self.lso_max * (time_left / 300.0))	
-			# p = max(0.0, min(1.0, time_left / 300.0))
-			# self.local_search_probability = max(self.lso_min, self.lso_max * p * p)
-			# for island in islands:
-			# 	island.local_search_probability = self.local_search_probability
-
-			print(f"Iteration: {iteration}, best = {best_objective}, mean= {mean_objective}")
-		return 0
-
-
-
-	# -------------------
-	# GA Methods
-	# -------------------
-	# """Initialization algorithms"""
-	# def initialize_population(self, num_cities, pop_size, distance_matrix=None):
-	# 	"""
-	# 	Initialize the population using multiple strategies.
-	# 	Strategies and ratios are defined as class attributes:
-	# 		self.init_methods = [
-	# 			("random", self.init_random, self.init_random_ratio),
-	# 			("greedy", self.init_greedy, self.init_greedy_ratio),
-	# 			("bfs", self.init_graph_bfs, self.init_bfs_ratio),
-	# 			("dfs", self.init_graph_dfs, self.init_dfs_ratio),
-	# 		]
-	# 	"""
-
-	# 	# Build the list of (method, ratio) dynamically
-	# 	methods = [
-	# 		(self.init_random, self.init_random_ratio),
-	# 		(self.init_greedy, self.init_greedy_ratio),
-	# 		(self.init_graph_bfs, self.init_bfs_ratio),
-	# 		(self.init_graph_dfs, self.init_dfs_ratio),
-	# 		(self.init_vectorized_random, self.init_vectorized_random_ratio)
-	# 	]
-	# 	# Compute number of individuals per method
-	# 	counts = [int(pop_size * ratio) for _, ratio in methods]
-
-	# 	# Fix rounding to make total exactly pop_size
-	# 	remaining = pop_size - sum(counts)
-	# 	if remaining != 0:
-	# 		counts[0] += remaining  # Add the difference to the first method (random)
-
-	# 	""" Print statements"""
-	# 	print("------------------------------")
-	# 	print(f"Initialized population of {pop_size} individuals.")
-	# 	method_names = ["Random", "Greedy", "BFS", "DFS", "random_feasible"]
-	# 	for method, count in zip(method_names, counts):
-	# 		print(f"{method}: {count}")
-	# 	print("------------------------------")
-		
-	# 	"""	-------------- """
-	# 	# Allocate population array
-	# 	population = np.zeros((pop_size, num_cities), dtype=np.int32)
-
-	# 	start_idx = 0
-	# 	for (method, _), count in zip(methods, counts):
-	# 		if count > 0:
-	# 			population[start_idx:start_idx+count] = method(
-	# 				distance_matrix if method != self.init_random else num_cities,	# Construction due to init_random taking other arguments
-	# 				count
-	# 			)
-	# 			start_idx += count
-
-		# return population
-
-	def initialize_population(self, pop_size, distance_matrix):
-		"""
-		Initialize the population using greedy initialization for all individuals,
-		optionally adding noise to diversify solutions.
-		"""
-		print("------------------------------")
-		print(f"Initialized population of {pop_size} individuals using Greedy + noise.")
-		print("------------------------------")
-		
-		# Directly call the Numba greedy initializer
-		population = init_greedy_numba(distance_matrix, pop_size, noise_scale=self.noise_init_greedy)
-		# population = local_search_population_2opt(population, distance_matrix, 10) # 1000 gives worse results hmmm weird
-		return population
-
-	# Random
-	def init_random(self, num_cities, pop_size):
-		pop = np.zeros((pop_size, num_cities), dtype=np.int32)
-		for i in range(pop_size):
-			pop[i] = np.random.permutation(num_cities)
-		return pop
-
-	# Greedy 
-	# def init_greedy(self, distance_matrix, pop_size):
-	# 	num_cities = distance_matrix.shape[0]
-	# 	population = np.zeros((pop_size, num_cities), dtype=np.int32)
-
-	# 	for k in range(pop_size):
-	# 		current = np.random.randint(0, num_cities)
-	# 		visited = [current]
-	# 		unvisited = set(range(num_cities))
-	# 		unvisited.remove(current)
-
-	# 		while unvisited:
-	# 			next_city = min(unvisited, key=lambda j: distance_matrix[current, j])
-	# 			visited.append(next_city)
-	# 			unvisited.remove(next_city)
-	# 			current = next_city
-
-	# 		population[k] = np.array(visited, dtype=np.int32)
-
-	# 	return population
-	
-	# Greedy with optional noise
-	def init_greedy(self, distance_matrix, pop_size, noise_scale=0.01):
-			N = distance_matrix.shape[0]
-			# --- Call the Numba function here ---
-			return init_greedy_numba(distance_matrix, pop_size, N, noise_scale)
-
-
-
-	def init_vectorized_random(self, distance_matrix, pop_size):
-		n = distance_matrix.shape[0]
-		pop = np.zeros((pop_size, n), dtype=np.int32)
-
-		# --- 1. Vectorized random permutations ---
-		for k in range(pop_size):
-			pop[k] = np.random.permutation(n)
-
-		# Convert ∞ to a large number for faster vector ops
-		INF = np.inf
-		dm = distance_matrix
-
-		# --- 2. Repair infeasible edges (vectorized per-individual) ---
-		for k in range(pop_size):
-			tour = pop[k]
-
-			for i in range(n - 1):
-				u = tour[i]
-				v = tour[i + 1]
-
-				if dm[u, v] == INF:
-					# find all feasible next nodes
-					remaining = tour[i+1:]
-					feasible_mask = (dm[u, remaining] != INF)
-
-					if not np.any(feasible_mask):
-						# fallback: choose closest feasible city (vectorized)
-						feasible = np.where(dm[u] != INF)[0]
-						v_new = feasible[np.argmin(dm[u, feasible])]
-					else:
-						# pick a random feasible city
-						feasible = remaining[feasible_mask]
-						v_new = np.random.choice(feasible)
-
-					# swap positions so next city is v_new
-					idx = np.where(tour == v_new)[0][0]
-					tour[i+1], tour[idx] = tour[idx], tour[i+1]
-
-			pop[k] = tour
-
-		return pop
-	# --- Graph-aware Randomized DFS ---
-	def init_graph_dfs(self, distance_matrix, pop_size):
-		num_cities = distance_matrix.shape[0]
-		population = np.zeros((pop_size, num_cities), dtype=np.int32)
-		raise NotImplemented
-
-	# --- Graph-aware BFS ---
-	def init_graph_bfs(self, distance_matrix, pop_size):
-		num_cities = distance_matrix.shape[0]
-		population = np.zeros((pop_size, num_cities), dtype=np.int32)
-
-		for k in range(pop_size):
-			start = np.random.randint(0, num_cities)
-			visited = [False] * num_cities
-			path = []
-
-			queue = [start]
-			while queue:
-				node = queue.pop(0)
-				if not visited[node]:
-					visited[node] = True
-					path.append(node)
-
-					# Neighbors: nodes with finite distance
-					neighbors = [j for j in range(num_cities)
-								if distance_matrix[node, j] != np.inf and not visited[j]]
-
-					np.random.shuffle(neighbors)  # Randomize BFS traversal
-					queue.extend(neighbors)
-
-			population[k] = np.array(path, dtype=np.int32)
-		return population
-
-
-	""" Evalulation of the population """
-	def evaluate_population(self, population, distance_matrix):
-		return evaluate_population_numba(population, distance_matrix)
-
-	""" next generation """
-	def next_generation(self, population, fitness, distance_matrix):
-		"""
-		(λ, µ) + elitism GA generation step.
-		Parents cannot survive except for explicit elites.
-		"""
-		num_individuals = len(population)
-		new_pop = np.zeros_like(population)
-
-		# === 1) Diversity check ===
-		global_hamming_diversity = global_hamming_diversity_numba(population)
-		use_sharing = global_hamming_diversity < self.fitness_sharing_treshold
-		# use_sharing = True
-		if use_sharing:
-			selection_fitness = fitness_sharing_numba(population, fitness, sigma=self.sigma, alpha=self.alpha)
-		else:
-			selection_fitness = fitness
-
-		# === 2) ELITISM ===
-		elitism = max(1,int(self.population_size * self.elitism_ratio))
-		# Copy top elites directly from parents
-		new_pop[:elitism] = elitism_core_numba(population, fitness, elitism)
-
-		# Apply local search on elites
-		for i in range(elitism):
-			if np.random.rand() < self.local_search_probability:
-				new_pop[i] = self.apply_local_search(new_pop[i], distance_matrix, global_hamming_diversity)
-
-		# === 3) Offspring creation ===
-		for i in range(elitism, num_individuals):
-			parent1, parent2 = tournament_selection_numba(
-				population, selection_fitness, self.k_tournament, 2
-			)
-			child = self.crossover(parent1, parent2)
-			child = self.mutate(child)
-
-			# Adaptive local search
-			child = self.apply_local_search(child, distance_matrix, global_hamming_diversity)
-			new_pop[i] = child
-
-		# === 4) Evaluation ===
-		new_fitness = evaluate_population_numba(new_pop, distance_matrix)
-
-		# === 5) Normalization (optional) ===
-		normalize_population_numba(new_pop)
-
-		# === 6) Elimination (λ, µ) style ===
-		# Only consider offspring (excluding elites) for survival
-		# Elites are already in place
-		offspring = new_pop[elitism:]
-		offspring_fitness = new_fitness[elitism:]
-		
-		# Select top (num_individuals - elitism) offspring
-		top_idx = np.argsort(offspring_fitness)[:num_individuals - elitism]
-		new_pop[elitism:] = offspring[top_idx]
-		new_fitness[elitism:] = offspring_fitness[top_idx]
-		return new_pop, new_fitness
-      
-	def next_generation_old(self, population, fitness, distance_matrix):
-		num_individuals = len(population)
-		new_pop = np.zeros_like(population)
-
-
-		# === Diversity check ===
-		global_hamming_diversity = global_hamming_diversity_numba(population)
-
-		use_sharing = global_hamming_diversity < self.fitness_sharing_treshold
-
-		if use_sharing:
-			selection_fitness = fitness_sharing_numba(population, fitness, sigma=self.sigma, alpha=self.alpha)
-		else:
-			selection_fitness = fitness
-                  
-		# === 1) ELITISM (Python) ===
-		elitism = int(self.population_size * self.elitism_ratio)
-		new_pop[:elitism] = elitism_core_numba(population, fitness, elitism)
-
-
-		# === Apply local search on elites ===
-		# For example, 2-opt or 3-opt
-		# for i in range(elitism):
-		# 	if np.random.rand() < self.local_search_probability:  # adaptive probability
-		# 		# Choose which LS: 2-opt or 3-opt
-		# 		new_pop[i] = two_opt_fast(new_pop[i], distance_matrix, max_improve=10)
-			
-		# === 2-4) Offspring creation loop ===
-		for i in range(elitism, num_individuals):
-			parent1, parent2 = tournament_selection_numba(
-				population, selection_fitness, self.k_tournament, 2
-			)
-			child = self.crossover(parent1, parent2)
-			child = self.mutate(child)
-
-			# Apply adaptive local search
-			child = self.apply_local_search(child, distance_matrix, global_hamming_diversity)
-			new_pop[i] = child
-
-                  
-
-		# === 5) Evaluation phase (Numba, via Python wrapper) ===
-		offspring_fitness = evaluate_population_numba(new_pop, distance_matrix)
-
-
-		normalize_population_numba(new_pop) # In place normalization
-		# === 6) Elimination phase (Numba) ===
-		new_pop, new_fitness = elimination_numba(
-			population,
-			new_pop,
-			fitness,
-			offspring_fitness,
-			num_individuals
-		)
-		# After elimination
-		# if global_hamming_diversity < 0.05:
-		# 	print("Nuke dropped")
-		# 	num_nuke = max(1, int(0.1 * num_individuals))  # 10% worst
-		# 	worst_idx = np.argsort(new_fitness)[-num_nuke:]  # indices of worst
-		# 	for idx in worst_idx:
-		# 		new_pop[idx] = init_greedy_numba(distance_matrix, 1, noise_scale=0.1)[0]
-		# 		new_fitness[idx] = evaluate_individual_numba(new_pop[idx], distance_matrix)
-
-		return new_pop, new_fitness
-
-
-	""" Selection process """
-	""" k-tournament selection (vectorized, faster for large populations) """
-
-	def select_parents(self, population, fitness):
-			"""
-			Wrapper for tournament selection, calling the Numba core.
-			"""
-			parent1, parent2 = tournament_selection_numba(
-					population, 
-					fitness, 
-					self.k_tournament, 
-					2
-					)
-			return parent1, parent2
-
-
-
-	""" Variation steps """
-	def crossover(self, parent1, parent2):
-		if np.random.rand() < self.crossover_rate_eff:
-			if np.random.rand() < 0.15:
-				return ordered_crossover(parent1, parent2)
-			else:
-				return epx_crossover(parent1, parent2)
-			# return erx_fast(parent1,parent2)
-		return parent1.copy()
-	def update_effective_crossover_rate(self, diversity):
-		"""
-		diversity ∈ [0,1]
-		high diversity  -> high crossover
-		low diversity   -> reduced crossover
-		"""
-
-		self.crossover_rate_eff = max(
-			self.crossover_rate * diversity**0.25,
-			0.1
-		)
-	
-	def edge_recombination(self,parent1, parent2):
-		"""
-		Edge Recombination Crossover (ERX).
-		parent1, parent2: sequences (numpy arrays or lists) of city ids.
-		returns a numpy array child of dtype int32 with same length.
-		"""
-		# convert parents to plain lists of Python ints
-		p1 = list(map(int, parent1))
-		p2 = list(map(int, parent2))
-		size = len(p1)
-
-		# Build adjacency map: city -> set(neighbors)
-		adj = {}
-		for p in (p1, p2):
-			for i, city in enumerate(p):
-				if city not in adj:
-					adj[city] = set()
-				left = p[i-1]            # wrap-around
-				right = p[(i+1) % size]
-				adj[city].add(left)
-				adj[city].add(right)
-
-		# Child construction
-		child = []
-		used = set()
-
-		# Start from a randomly chosen city (could choose p1[0] or random)
-		current = int(np.random.choice(p1))  # random start from parent1
-		while len(child) < size:
-			child.append(current)
-			used.add(current)
-
-			# Remove current from adjacency lists
-			for nbrs in adj.values():
-				if current in nbrs:
-					nbrs.discard(current)
-
-			# If all cities are used, break
-			if len(child) >= size:
-				break
-
-			# Candidate neighbors (remaining neighbors of current) sorted by their adjacency size
-			remaining_neighbors = [n for n in adj[current] if n not in used] if current in adj else []
-
-			if remaining_neighbors:
-				# choose the neighbor with fewest neighbors (degree). Break ties randomly.
-				min_deg = None
-				candidates = []
-				for n in remaining_neighbors:
-					deg = len([x for x in adj.get(n, set()) if x not in used])
-					if (min_deg is None) or (deg < min_deg):
-						min_deg = deg
-						candidates = [n]
-					elif deg == min_deg:
-						candidates.append(n)
-				current = int(np.random.choice(candidates))
-			else:
-				# no neighbors left -> pick a random unused city
-				unused = [c for c in p1 if c not in used]
-				if not unused:
-					# fallback: include any city not used (shouldn't really happen)
-					unused = [c for c in adj.keys() if c not in used]
-				current = int(np.random.choice(unused))
-
-		return np.array(child, dtype=np.int32)
-
-	def mutate(self, individual):
-		if np.random.rand() < self.mutation_rate:
-			U = np.random.rand()
-			if U < self.swap_ratio:
-				return swap_mutation(individual)
-			elif U < self.swap_ratio + self.inversion_ratio:
-				return inversion_mutation(individual)
-			else:
-				return scramble_mutation(individual)
-		return individual
-	
-
-	""" Default settings for hyperparameters """
-	def set_mutation(self,type):
-		if type == "swap":
-			self.swap_ratio = 1.0
-			self.inversion_ratio = 0.0
-			self.scramble_ratio = 0.0
-		if type == "inversion":
-			self.swap_ratio = 0.0
-			self.inversion_ratio = 1.0
-			self.scramble_ratio = 0.0
-		if type == "scramble":
-			self.swap_ratio = 0.0
-			self.inversion_ratio = 0.0
-			self.scramble_ratio = 1.0
-		assert self.swap_ratio + self.inversion_ratio + self.scramble_ratio == 1.0
+    """ Selection process """
+    """ k-tournament selection (vectorized, faster for large populations) """
+
+    def select_parents(self, population, fitness):
+        """
+        Wrapper for tournament selection, calling the Numba core.
+        """
+        parent1, parent2 = tournament_selection_numba(
+            population, 
+            fitness, 
+            self.k_tournament, 
+            2
+        )
+        return parent1, parent2
+
+
+
+    """ Variation steps """
+    def crossover(self, parent1, parent2):
+        if np.random.rand() < self.crossover_rate_eff:
+            U = np.random.uniform()
+            if U < self.ox_ratio:
+                return ordered_crossover(parent1, parent2)
+            elif U < self.ox_ratio + self.epx_ratio:
+                return epx_crossover(parent1, parent2)
+            else:
+                return erx_fast(parent1,parent2)
+        return parent1.copy()
+    
+    def update_effective_crossover_rate(self, diversity):
+        """
+        diversity ∈ [0,1]
+        high diversity  -> high crossover
+        low diversity   -> reduced crossover
+        """
+        self.crossover_rate_eff = self.crossover_min + (self.crossover_max-self.crossover_min)*diversity
+    
+    def edge_recombination(self,parent1, parent2):
+        """
+        Edge Recombination Crossover (ERX).
+        parent1, parent2: sequences (numpy arrays or lists) of city ids.
+        returns a numpy array child of dtype int32 with same length.
+        """
+        # convert parents to plain lists of Python ints
+        p1 = list(map(int, parent1))
+        p2 = list(map(int, parent2))
+        size = len(p1)
+
+        # Build adjacency map: city -> set(neighbors)
+        adj = {}
+        for p in (p1, p2):
+            for i, city in enumerate(p):
+                if city not in adj:
+                    adj[city] = set()
+                left = p[i-1]            # wrap-around
+                right = p[(i+1) % size]
+                adj[city].add(left)
+                adj[city].add(right)
+
+        # Child construction
+        child = []
+        used = set()
+
+        # Start from a randomly chosen city (could choose p1[0] or random)
+        current = int(np.random.choice(p1))  # random start from parent1
+        while len(child) < size:
+            child.append(current)
+            used.add(current)
+
+            # Remove current from adjacency lists
+            for nbrs in adj.values():
+                if current in nbrs:
+                    nbrs.discard(current)
+
+            # If all cities are used, break
+            if len(child) >= size:
+                break
+
+            # Candidate neighbors (remaining neighbors of current) sorted by their adjacency size
+            remaining_neighbors = [n for n in adj[current] if n not in used] if current in adj else []
+
+            if remaining_neighbors:
+                # choose the neighbor with fewest neighbors (degree). Break ties randomly.
+                min_deg = None
+                candidates = []
+                for n in remaining_neighbors:
+                    deg = len([x for x in adj.get(n, set()) if x not in used])
+                    if (min_deg is None) or (deg < min_deg):
+                        min_deg = deg
+                        candidates = [n]
+                    elif deg == min_deg:
+                        candidates.append(n)
+                current = int(np.random.choice(candidates))
+            else:
+                # no neighbors left -> pick a random unused city
+                unused = [c for c in p1 if c not in used]
+                if not unused:
+                    # fallback: include any city not used (shouldn't really happen)
+                    unused = [c for c in adj.keys() if c not in used]
+                current = int(np.random.choice(unused))
+
+        return np.array(child, dtype=np.int32)
+
+    def mutate(self, individual):
+        if np.random.rand() < self.mutation_rate:
+            U = np.random.rand()
+            if U < self.swap_ratio:
+                return swap_mutation(individual)
+            elif U < self.swap_ratio + self.inversion_ratio:
+                return inversion_mutation(individual)
+            else:
+                return scramble_mutation(individual)
+        return individual
+
+    """ Default settings for hyperparameters """
+    def set_mutation(self,type):
+        if type == "swap":
+            self.swap_ratio = 1.0
+            self.inversion_ratio = 0.0
+            self.scramble_ratio = 0.0
+        if type == "inversion":
+            self.swap_ratio = 0.0
+            self.inversion_ratio = 1.0
+            self.scramble_ratio = 0.0
+        if type == "scramble":
+            self.swap_ratio = 0.0
+            self.inversion_ratio = 0.0
+            self.scramble_ratio = 1.0
+        assert self.swap_ratio + self.inversion_ratio + self.scramble_ratio == 1.0
             
-	def apply_local_search(self, individual, distance_matrix, global_hamming_diversity):
-		"""
-		High diversity → more local search, mostly light (2-opt)
-		Low diversity → less LS, but stronger if applied
-		"""
+    def apply_local_search(self, individual, distance_matrix, global_hamming_diversity):
+        """
+        High diversity → more local search, mostly light (2-opt)
+        Low diversity → less LS, but stronger if applied
+        """
 
-		# # --- LS probability: increases with diversity
-		# ls_prob = max(
-		# 	self.local_search_probability * global_hamming_diversity,
-		# 	0.15
-		# )
-		# if np.random.rand() >= ls_prob:
-		# 	return individual
-		if np.random.rand() >= self.local_search_probability:
-			return individual
-
-		# # --- LS type probabilities
-		# # High diversity → 2-opt dominates
-		# two_opt_prob   = 0.6 + 0.3 * global_hamming_diversity
-		# seg_swap_prob  = 0.25
-		# three_opt_prob = 1.0 - two_opt_prob - seg_swap_prob
-
-		# probs = np.array([two_opt_prob, seg_swap_prob, three_opt_prob])
-		# probs = np.clip(probs, 0.05, 1.0)
-		# probs /= probs.sum()
-
-		# choice = np.random.choice([0, 1, 2], p=probs)
-
-		# if choice == 0:
-		# 	return two_opt_fast(
-		# 		individual, distance_matrix, self.max_improv_two_opt
-		# 	)
-
-		# elif choice == 1:
-		# 	N = distance_matrix.shape[0]
-		# 	segment_length = np.random.randint(
-		# 		self.min_seg, min(self.max_seg, N)
-		# 	)
-		# 	return segment_swap_delta_safe(
-		# 		individual, distance_matrix,
-		# 		max_improvement=self.max_improv_seg_swap,
-		# 		segment_length=segment_length
-		# 	)
-
-		# else:
-		# 	return three_opt_fast(
-		# 		individual, distance_matrix, self.max_improv_three_opt
-		# 	)
+        ls_prob = self.lso_min + (self.lso_max- self.lso_min)*global_hamming_diversity
+        if np.random.rand() >= ls_prob:
+            return individual
             
-		else:
-			if np.random.uniform() < 0.10:
-				return three_opt_fast(individual, distance_matrix,self.max_improv_two_opt)
-			else:
-				return or_opt_fast(individual, distance_matrix, 10, 4)
+        else:
+            U = np.random.uniform()
+            if U < self.two_opt_ratio:
+                return two_opt_fast(individual, distance_matrix,self.max_improv_three_opt)
+            elif U < self.two_opt_ratio + self.three_opt_ratio:
+                return three_opt_fast(individual, distance_matrix, self.max_improv_three_opt)
+            else:
+                return or_opt_fast(individual, distance_matrix, self.max_improv_or_opt, self.max_seg_length_or_opt)
 
+    def migrate(self, islands, distance_matrix, migrants_per_island=1):
+        """
+        Ring migration: best individuals from each island move to the next island.
+        Only recompute fitness for swapped individuals.
+        """
+        num_islands = len(islands)
+        
+        # get best individual(s) per island
+        best_individuals = [isl.population[np.argmin(isl.fitness)].copy() for isl in islands]
 
-	def migrate(self, islands, distance_matrix, migrants_per_island=1):
-		"""
-		Ring migration: best individuals from each island move to the next island.
-		Only recompute fitness for swapped individuals.
-		"""
-		num_islands = len(islands)
-		
-		# get best individual(s) per island
-		best_individuals = [isl.population[np.argmin(isl.fitness)].copy() for isl in islands]
+        for i in range(num_islands):
+            next_island = (i + 1) % num_islands
+            
+            for _ in range(migrants_per_island):
+                # find worst individual in the next island
+                worst_idx = np.argmax(islands[next_island].fitness)
+                
+                # replace worst individual with the best from current island
+                islands[next_island].population[worst_idx] = best_individuals[i].copy()
+                
+                # recompute fitness for the swapped individual only
+                islands[next_island].fitness[worst_idx] = islands[next_island].evaluate_population(
+                    islands[next_island].population[worst_idx:worst_idx+1], distance_matrix
+                )[0]
 
-		for i in range(num_islands):
-			next_island = (i + 1) % num_islands
-			
-			for _ in range(migrants_per_island):
-				# find worst individual in the next island
-				worst_idx = np.argmax(islands[next_island].fitness)
-				
-				# replace worst individual with the best from current island
-				islands[next_island].population[worst_idx] = best_individuals[i].copy()
-				
-				# recompute fitness for the swapped individual only
-				islands[next_island].fitness[worst_idx] = islands[next_island].evaluate_population(
-					islands[next_island].population[worst_idx:worst_idx+1], distance_matrix
-				)[0]
+    def print_islands_rules(self, islands):
+        """
+        Print all island hyperparameters in a table.
+        """
+        headers = [
+        "Island", "Pop",
+        "Swap", "Inv", "Scramble",
+        "OX", "EPX", "ERX",
+        ]
 
-	def print_islands_rules(self, islands):
-		"""
-		Print all island hyperparameters in a table.
-		"""
-		headers = [
-		"Island", "Pop", "MutRate", "CrossRate",
-		"Swap", "Inv", "Scramble",
-		"Greedy", "Random", "BFS", "DFS", "VectRand",
-		"LocSearch", "MutPat", "MutHigh", "MutLow"
-		]
+        # Print header
+        print(" | ".join(f"{h:>9}" for h in headers))
+        print("-" * 140)
 
-		# Print header
-		print(" | ".join(f"{h:>9}" for h in headers))
-		print("-" * 140)
-
-		for isl in islands:
-			row = [
-				getattr(isl, "idx", "?"),
-				isl.population_size,
-				f"{isl.mutation_rate:.3f}",
-				f"{isl.crossover_rate:.3f}",
-				f"{isl.swap_ratio:.3f}",
-				f"{isl.inversion_ratio:.3f}",
-				f"{isl.scramble_ratio:.3f}",
-				f"{isl.init_greedy_ratio:.3f}",
-				f"{isl.init_random_ratio:.3f}",
-				f"{isl.init_bfs_ratio:.3f}",
-				f"{isl.init_dfs_ratio:.3f}",
-				f"{isl.init_vectorized_random_ratio:.3f}",
-				f"{isl.local_search_probability:.3f}",
-				isl.mutation_patience,
-				f"{isl.mut_high:.3f}",
-				f"{isl.mut_low:.3f}"
-			]
-			print(" | ".join(f"{str(r):>9}" for r in row))
+        for isl in islands:
+            row = [
+                getattr(isl, "idx", "?"),
+                isl.population_size,
+                f"{isl.swap_ratio:.3f}",
+                f"{isl.inversion_ratio:.3f}",
+                f"{isl.scramble_ratio:.3f}",
+                f"{isl.ox_ratio:.3f}",
+                f"{isl.epx_ratio:.3f}",
+                f"{isl.erx_ratio:.3f}"
+            ]
+            print(" | ".join(f"{str(r):>9}" for r in row))
 
 
 
 class Island(r0877229):
-	def __init__(self, population_size, idx=None):
-		""" Island class """
-		super().__init__()
-		self.population_size = population_size
-		self.idx = idx
-		self.population = None
-		self.fitness = None
-		self.indiv_rules = None
-		self.no_improvement = 0
-		self.best_objective = np.inf
-		self.crossover_rate_eff = self.crossover_rate
+    def __init__(self, population_size, idx=None):
+        """ Island class """
+        super().__init__()
+        self.population_size = population_size
+        self.idx = idx
+        self.population = None
+        self.fitness = None
+        self.indiv_rules = None
+        self.no_improvement = 0
+        self.best_objective = np.inf
+        self.crossover_rate_eff = (self.crossover_min + self.crossover_max)/2 # Start with mean of crossover_min and crossover_max
 
-	def initialize(self, distance_matrix):
-		self.population = self.initialize_population(self.population_size, distance_matrix)
-		normalize_population_numba(self.population) # In place normalization
+    def initialize(self, distance_matrix):
+        self.population = self.initialize_population(self.population_size, distance_matrix)
+        normalize_population_numba(self.population) # In place normalization
+        self.fitness = evaluate_population_numba(self.population, distance_matrix)
 
-		self.fitness = evaluate_population_numba(self.population, distance_matrix)
+
+    def next_generation(self, distance_matrix):
+        self.population, self.fitness =  super().next_generation(self.population, self.fitness, distance_matrix)
+
+    def adaptive_mutation(self):
+        current_best = min(self.fitness)
+        if current_best < self.best_objective:
+            # Improvement found
+            self.best_objective = current_best
+            self.no_improvement = 0
+            self.mutation_rate = self.mut_base
+        else:
+            self.no_improvement += 1
+            if self.no_improvement >= self.mutation_patience:
+                self.mutation_rate = self.mut_high
+
+    def best(self):
+        idx = np.argmin(self.fitness)
+        return self.population[idx], self.fitness[idx]
 
 
-	def next_generation(self, distance_matrix):
-		self.population, self.fitness =  super().next_generation(self.population, self.fitness, distance_matrix)
+    def specialize(self, alpha):
+        """ Specialize the island towards its highest ratio """
+        # Higher alpha -> more specialized
+        # Lower alpha -> flatter / more uniform ratios
+        normalization = self.ox_ratio**alpha + self.epx_ratio**alpha + self.erx_ratio**alpha 
 
-	def adaptive_mutation(self):
-		current_best = min(self.fitness)
-		if current_best < self.best_objective:
-			# Improvement found
-			self.best_objective = current_best
-			self.no_improvement = 0
-			self.mutation_rate = self.mut_low
-		else:
-			self.no_improvement += 1
-			if self.no_improvement >= self.mutation_patience:
-				self.mutation_rate = self.mut_high
-				# print(f"Island {self.idx}: Mutation rate increased to {self.mutation_rate}")
-
-	def best(self):
-		idx = np.argmin(self.fitness)
-		return self.population[idx], self.fitness[idx]
-
-	def apply_island_diversity(self, island_idx, num_islands, diversity_scale=0.2):
-		"""
-		Scale hyperparameters per island using linear + random factor.
-		Ensures ratios sum to 1 for initialization and mutation operators.
-		"""
-		# -------------------
-		# Factor for diversity
-		# -------------------
-		base_factor = island_idx / max(1, num_islands - 1)
-		random_offset = np.random.uniform(-diversity_scale, diversity_scale)
-		factor = np.clip(base_factor + random_offset, 0, 1)
-
-		# -------------------
-		# Variation parameters
-		# -------------------
-		self.mutation_rate = self.mut_low + factor * (self.mut_high - self.mut_low)
-		self.crossover_rate = self.crossover_rate * (0.8 + 0.4*factor)
-
-		# -------------------
-		# Initialization ratios
-		# -------------------
-		self.init_greedy_ratio = max(0, self.init_greedy_ratio - factor*0.5)
-		self.init_random_ratio = max(0, self.init_random_ratio + factor*0.5)
-
-		init_ratios = np.array([
-			self.init_greedy_ratio,
-			self.init_random_ratio,
-			self.init_bfs_ratio,
-			self.init_dfs_ratio,
-			self.init_vectorized_random_ratio
-		])
-		init_ratios /= init_ratios.sum()  # normalize
-		(
-			self.init_greedy_ratio,
-			self.init_random_ratio,
-			self.init_bfs_ratio,
-			self.init_dfs_ratio,
-			self.init_vectorized_random_ratio
-		) = init_ratios
-		
-		
-		# -------------------
-		# Selection params
-		# -------------------
-		self.k_tournament = max(1, int(self.k_tournament * (1 + 0.2 * diversity_scale)))
-		self.elitism_ratio = min(0.5, self.elitism_ratio * (1 + 0.2 * diversity_scale))
-		
-		# -------------------
-		# Mutation operator ratios
-		# -------------------
-		swap = max(0, self.swap_ratio * (1 - 0.2*factor))
-		inversion = max(0, self.inversion_ratio * (1 + 0.1*factor))
-		scramble = max(0, self.scramble_ratio)  # keep as-is or perturb slightly
-
-		mut_ratios = np.array([swap, inversion, scramble])
-		mut_ratios /= mut_ratios.sum()  # normalize
-		self.swap_ratio, self.inversion_ratio, self.scramble_ratio = mut_ratios
-
-		# -------------------
-		# Local search probability
-		# -------------------
-		self.local_search_probability *= (0.8 + 0.4*factor)
-		# self.max_improvement_lso = max(1, int(self.max_improvement_lso * (1 + 0.2 * diversity_scale)))
-
+        self.ox_ratio  = self.ox_ratio**alpha  / normalization
+        self.epx_ratio = self.epx_ratio**alpha / normalization
+        self.erx_ratio = self.erx_ratio**alpha / normalization
 
 
 
@@ -887,17 +590,17 @@ def island_distance(pop1, pop2):
 # -------------------
 @njit(parallel=True)
 def evaluate_population_numba(population, distance_matrix):
-	n = population.shape[0]
-	fitness = np.zeros(n)
-	for i in prange(n):
-		tour = population[i]
-		total = 0.0
-		for j in range(len(tour)):
-			from_city = tour[j]
-			to_city = tour[(j + 1) % len(tour)]
-			total += distance_matrix[from_city, to_city]
-		fitness[i] = total
-	return fitness
+    n = population.shape[0]
+    fitness = np.zeros(n)
+    for i in prange(n):
+        tour = population[i]
+        total = 0.0
+        for j in range(len(tour)):
+            from_city = tour[j]
+            to_city = tour[(j + 1) % len(tour)]
+            total += distance_matrix[from_city, to_city]
+        fitness[i] = total
+    return fitness
 
 @njit(cache=True)
 def evaluate_individual_numba(route, distance_matrix):
@@ -959,17 +662,17 @@ def scramble_mutation(individual):
 
 @njit
 def ordered_crossover(parent1, parent2):
-	size = len(parent1)
-	a, b = sorted(np.random.choice(size, 2, replace=False))
-	child = -np.ones(size, dtype=np.int32)
-	child[a:b+1] = parent1[a:b+1]
-	pointer = 0
-	for gene in parent2:
-		if gene not in child:
-			while child[pointer] != -1:
-				pointer += 1
-			child[pointer] = gene
-	return child
+    size = len(parent1)
+    a, b = sorted(np.random.choice(size, 2, replace=False))
+    child = -np.ones(size, dtype=np.int32)
+    child[a:b+1] = parent1[a:b+1]
+    pointer = 0
+    for gene in parent2:
+        if gene not in child:
+            while child[pointer] != -1:
+                pointer += 1
+            child[pointer] = gene
+    return child
 
 
 @njit(cache=True)
